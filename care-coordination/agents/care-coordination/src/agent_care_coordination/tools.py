@@ -12,16 +12,6 @@ from magenta_sdklanggraph import App
 from pymongo import MongoClient
 
 
-def _get_care_gaps_collection():
-    uri = os.environ.get("MONGODB_URI")
-    if not uri:
-        return None
-    db_name = os.environ.get("MONGODB_DATABASE", "hc_clinical_platform")
-    collection_name = os.environ.get("MONGODB_CARE_GAPS_COLLECTION", "patient_360")
-    client = MongoClient(uri)
-    return client[db_name][collection_name]
-
-
 def _get_backend_url() -> str:
     """Get the backend service URL. Configurable via env var, defaults to Kubernetes DNS."""
     return os.environ.get("BACKEND_URL", "http://backend-service:8000")
@@ -73,43 +63,6 @@ def register(app: App) -> None:
         if not memory_context:
             return json.dumps({"found": False, "message": "No stored information found"})
         return json.dumps({"found": True, "profile": memory_context})
-
-    @app.tool(is_local=False)
-    def get_care_gaps(patient_id: str, status: str = "all") -> str:
-        """Retrieve care gaps for a patient from the healthcare database.
-
-        Args:
-            patient_id: The unique patient or member ID to look up.
-            status: Filter by gap status. Use "open" for unmet gaps, "closed" for
-                    completed gaps, or "all" to return every gap. Defaults to "all".
-        """
-        collection = _get_care_gaps_collection()
-        if collection is None:
-            return json.dumps({"error": "MONGODB_URI is not configured."})
-
-        db_name = collection.database.name
-        collection_name = collection.name
-        total_docs = collection.count_documents({})
-
-        patient = collection.find_one(
-            {"patient_id": patient_id},
-            {"care_gaps": 1, "_id": 0},
-        )
-        if patient is None:
-            return json.dumps({
-                "error": f"No patient found with ID: {patient_id}",
-                "debug": {
-                    "database": db_name,
-                    "collection": collection_name,
-                    "total_documents_in_collection": total_docs,
-                },
-            })
-
-        gaps: list = patient.get("care_gaps", [])
-        if status != "all":
-            gaps = [g for g in gaps if g.get("status") == status]
-
-        return json.dumps({"patient_id": patient_id, "status_filter": status, "care_gaps": gaps})
 
     # --- Care Coordination Domain Tools ---
 

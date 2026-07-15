@@ -45,6 +45,10 @@ class Repository:
     def upsert_many(self, documents):
         return [self.upsert(doc) for doc in documents]
 
+    def delete_by(self, query):
+        """Delete every document matching a query. Returns the delete count."""
+        return self.collection.delete_many(query).deleted_count
+
     def delete_all(self):
         """Clear the collection. Used to reset demo data before a fresh seed."""
         return self.collection.delete_many({}).deleted_count

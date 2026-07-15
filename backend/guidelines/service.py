@@ -1,5 +1,6 @@
 """Business logic for clinical guidelines (procedural and taxonomic memory)."""
 
+from db.mdb import get_connector
 from .repository import GuidelineRepository
 
 
@@ -10,8 +11,8 @@ class GuidelineService:
     (reason by category), and procedural memory (decision gates).
     """
 
-    def __init__(self):
-        self.repository = GuidelineRepository()
+    def __init__(self, connector=None):
+        self.repository = GuidelineRepository(connector or get_connector())
 
     def get_guideline_for_condition(self, condition_code: str) -> dict:
         """Retrieve the latest guideline for a condition.

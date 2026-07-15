@@ -14,6 +14,10 @@ class ClaimRepository(Repository):
     def find_by_member(self, member_id):
         return self.find({"member_id": member_id})
 
+    def delete_by_member(self, member_id):
+        """Remove all claims for a member (used by demo reset)."""
+        return self.delete_by({"member_id": member_id})
+
     def find_comparable(self, service, diagnosis):
         """Retrieve prior adjudicated claims with the same service + diagnosis."""
         return self.find({"service": service, "diagnosis": diagnosis})

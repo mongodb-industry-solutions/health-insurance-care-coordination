@@ -1,5 +1,6 @@
 """Business logic for claims and comparable case retrieval."""
 
+from db.mdb import get_connector
 from .repository import ClaimRepository
 
 
@@ -10,8 +11,8 @@ class ClaimService:
     (episodic memory for authorization decisions).
     """
 
-    def __init__(self):
-        self.repository = ClaimRepository()
+    def __init__(self, connector=None):
+        self.repository = ClaimRepository(connector or get_connector())
 
     def find_comparable_cases(self, service: str, diagnosis: str) -> list:
         """Find prior adjudicated claims with the same service and diagnosis.

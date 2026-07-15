@@ -15,5 +15,9 @@ class AuthorizationRepository(Repository):
     def find_by_member(self, member_id):
         return self.find({"member_id": member_id})
 
+    def delete_by_member(self, member_id):
+        """Remove all authorizations for a member (used by demo reset)."""
+        return self.delete_by({"member_id": member_id})
+
     def find_routed_to_human(self):
         return self.find({"review.routed_to_human": True})

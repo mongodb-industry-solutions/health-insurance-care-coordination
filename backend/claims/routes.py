@@ -1,15 +1,22 @@
 """API routes for claims operations."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from db.mdb import MongoDBConnector, get_connector
 from .service import ClaimService
+from .models import Claim, ComparableClaimsResponse, MemberClaimsResponse, ClaimsList
 
 router = APIRouter(prefix="/api/claims", tags=["claims"])
-service = ClaimService()
 
 
-@router.get("/comparable")
-async def find_comparable_claims(service_name: str, diagnosis: str):
+def get_claim_service(connector: MongoDBConnector = Depends(get_connector)) -> ClaimService:
+    return ClaimService(connector)
+
+
+@router.get("/comparable", response_model=ComparableClaimsResponse)
+async def find_comparable_claims(
+    service_name: str, diagnosis: str, service: ClaimService = Depends(get_claim_service)
+):
     """Find prior adjudicated claims with the same service and diagnosis.
 
     Used as episodic memory: shows precedent of similar treatments for
@@ -23,8 +30,10 @@ async def find_comparable_claims(service_name: str, diagnosis: str):
     }
 
 
-@router.get("/member/{member_id}")
-async def get_member_claims(member_id: str):
+@router.get("/member/{member_id}", response_model=MemberClaimsResponse)
+async def get_member_claims(
+    member_id: str, service: ClaimService = Depends(get_claim_service)
+):
     """Retrieve all claims for a member."""
     claims = service.get_member_claims(member_id)
     return {
@@ -34,8 +43,8 @@ async def get_member_claims(member_id: str):
     }
 
 
-@router.get("/{claim_id}")
-async def get_claim(claim_id: str):
+@router.get("/{claim_id}", response_model=Claim)
+async def get_claim(claim_id: str, service: ClaimService = Depends(get_claim_service)):
     """Retrieve a specific claim."""
     doc = service.get_claim(claim_id)
     if not doc:
@@ -43,7 +52,8 @@ async def get_claim(claim_id: str):
     return doc
 
 
-@router.get("")
-async def list_all_claims():
+@router.get("", response_model=ClaimsList)
+async def list_all_claims(service: ClaimService = Depends(get_claim_service)):
     """Retrieve all claims."""
-    return service.list_all_claims()
+    claims = service.list_all_claims()
+    return {"count": len(claims), "claims": claims}

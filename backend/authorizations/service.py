@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 
+from db.mdb import get_connector
 from .repository import AuthorizationRepository
 from members.repository import MemberRepository
 from guidelines.repository import GuidelineRepository
@@ -16,12 +17,13 @@ class AuthorizationService:
     to build complete authorization decisions with decision traces.
     """
 
-    def __init__(self):
-        self.auth_repo = AuthorizationRepository()
-        self.member_repo = MemberRepository()
-        self.guideline_repo = GuidelineRepository()
-        self.claim_repo = ClaimRepository()
-        self.audit_repo = AuditRepository()
+    def __init__(self, connector=None):
+        connector = connector or get_connector()
+        self.auth_repo = AuthorizationRepository(connector)
+        self.member_repo = MemberRepository(connector)
+        self.guideline_repo = GuidelineRepository(connector)
+        self.claim_repo = ClaimRepository(connector)
+        self.audit_repo = AuditRepository(connector)
 
     def evaluate_authorization(
         self,

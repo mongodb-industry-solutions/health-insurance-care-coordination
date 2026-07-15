@@ -1,13 +1,14 @@
 """Business logic for member operations."""
 
+from db.mdb import get_connector
 from .repository import MemberRepository
 
 
 class MemberService:
     """Service layer for member-related operations."""
 
-    def __init__(self):
-        self.repository = MemberRepository()
+    def __init__(self, connector=None):
+        self.repository = MemberRepository(connector or get_connector())
 
     def get_clinical_context(self, member_id: str) -> dict:
         """Retrieve member's clinical history and eligibility for decision-making."""

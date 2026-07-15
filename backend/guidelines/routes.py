@@ -1,15 +1,24 @@
 """API routes for guidelines operations."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from db.mdb import MongoDBConnector, get_connector
 from .service import GuidelineService
+from .models import GuidelineResponse, Guideline, GuidelinesListResponse, AllGuidelinesResponse
 
 router = APIRouter(prefix="/api/guidelines", tags=["guidelines"])
-service = GuidelineService()
 
 
-@router.get("/condition/{condition_code}")
-async def get_guideline_for_condition(condition_code: str):
+def get_guideline_service(
+    connector: MongoDBConnector = Depends(get_connector),
+) -> GuidelineService:
+    return GuidelineService(connector)
+
+
+@router.get("/condition/{condition_code}", response_model=GuidelineResponse)
+async def get_guideline_for_condition(
+    condition_code: str, service: GuidelineService = Depends(get_guideline_service)
+):
     """Retrieve the latest guideline for a condition.
 
     Returns taxonomic classification and procedural criteria that agents
@@ -31,8 +40,10 @@ async def get_guideline_for_condition(condition_code: str):
     }
 
 
-@router.get("/condition/{condition_code}/all")
-async def get_all_guidelines_for_condition(condition_code: str):
+@router.get("/condition/{condition_code}/all", response_model=GuidelinesListResponse)
+async def get_all_guidelines_for_condition(
+    condition_code: str, service: GuidelineService = Depends(get_guideline_service)
+):
     """Retrieve all guideline versions for a condition (newest first)."""
     guidelines = service.get_all_guidelines_for_condition(condition_code)
     return {
@@ -42,8 +53,10 @@ async def get_all_guidelines_for_condition(condition_code: str):
     }
 
 
-@router.get("/{guideline_id}")
-async def get_guideline(guideline_id: str):
+@router.get("/{guideline_id}", response_model=Guideline)
+async def get_guideline(
+    guideline_id: str, service: GuidelineService = Depends(get_guideline_service)
+):
     """Retrieve a specific guideline by ID."""
     doc = service.get_guideline(guideline_id)
     if not doc:
@@ -51,7 +64,8 @@ async def get_guideline(guideline_id: str):
     return doc
 
 
-@router.get("")
-async def list_all_guidelines():
+@router.get("", response_model=AllGuidelinesResponse)
+async def list_all_guidelines(service: GuidelineService = Depends(get_guideline_service)):
     """Retrieve all guidelines."""
-    return service.list_all_guidelines()
+    guidelines = service.list_all_guidelines()
+    return {"count": len(guidelines), "guidelines": guidelines}

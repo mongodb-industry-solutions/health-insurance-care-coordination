@@ -1,5 +1,6 @@
 """Business logic for audit logging and compliance."""
 
+from db.mdb import get_connector
 from .repository import AuditRepository
 
 
@@ -11,8 +12,8 @@ class AuditService:
     and why.
     """
 
-    def __init__(self):
-        self.repository = AuditRepository()
+    def __init__(self, connector=None):
+        self.repository = AuditRepository(connector or get_connector())
 
     def log_action(
         self,

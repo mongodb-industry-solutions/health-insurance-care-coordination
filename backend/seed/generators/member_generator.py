@@ -16,10 +16,19 @@ Everything is derived from the profile so the data stays internally consistent
 from datetime import datetime, timedelta, timezone
 
 from .profiles import PatientProfile
+from .plans import PLANS
+
+_PLANS_BY_ID = {plan["_id"]: plan for plan in PLANS}
 
 
-def _iso(dt: datetime) -> str:
-    return dt.strftime("%Y-%m-%d")
+def _plan_for(profile: PatientProfile) -> dict:
+    return _PLANS_BY_ID[profile.plan_id]
+
+
+def _entitled_tier(plan: dict) -> str:
+    """Highest tier the plan actually covers — the member's effective entitlement."""
+    tiers = plan.get("coverage", {}).get("tiers", {})
+    return "specialty" if tiers.get("specialty", {}).get("covered") else "standard"
 
 
 def _iso_ts(dt: datetime) -> str:
@@ -124,26 +133,34 @@ def build_claims(profile: PatientProfile) -> list[dict]:
 
 
 def build_member(profile: PatientProfile) -> dict:
-    """Build the core member document."""
-    now = datetime.now(timezone.utc)
-    trial_start = _parse(profile.enrollment_date) + timedelta(days=28)
-    documented_on = trial_start + timedelta(days=30 * profile.trial_months)
+    """Build the core member document at its Phase 0 baseline.
 
-    treatment_notes = (
-        profile.trial_gap.clinical_reason
-        if profile.trial_gap
-        else f"{profile.trial_months} months documented, {profile.trial_outcome} response"
-    )
+    Phase 0 is *before* Dr. Patel documents the inadequate methotrexate response.
+    So the member is still actively on the first-line drug, there is no documented
+    treatment_response and no considered biologic yet. Those are Phase 1 outputs
+    (the "document inadequate response" action), not seeded facts. The ~7-month
+    trial itself is real Phase 0 history — it lives in the `claims` refill timeline.
+    """
+    now = datetime.now(timezone.utc)
+
+    # Eligibility is derived from the plan, not asserted: the member's effective
+    # tier is the highest tier the plan covers, and term_date is only present when
+    # coverage has lapsed. This makes coverage/eligibility checkable rather than
+    # always-passing.
+    plan = _plan_for(profile)
+    eligibility = {
+        "status": profile.eligibility_status,
+        "effective_date": profile.enrollment_date,
+        "tier": _entitled_tier(plan),
+    }
+    if profile.coverage_end_date:
+        eligibility["term_date"] = profile.coverage_end_date
 
     return {
         "_id": profile.member_id,
         "plan_id": profile.plan_id,
         # Eligibility & plan: small, stable, read on nearly every decision
-        "eligibility": {
-            "status": "active",
-            "effective_date": profile.enrollment_date,
-            "tier": profile.plan_tier,
-        },
+        "eligibility": eligibility,
         "demographics": {
             "name": profile.name,
             "birth_date": profile.birth_date,
@@ -160,145 +177,80 @@ def build_member(profile: PatientProfile) -> dict:
                     "status": "active",
                 }
             ],
+            # First-line therapy is still ACTIVE at Phase 0 — she is currently on
+            # methotrexate. It is not marked discontinued/inadequate until Dr. Patel
+            # documents the response in Phase 1.
             "medications": [
                 {
                     "code": profile.first_line_rxnorm,
                     "system": "RxNorm",
                     "display": profile.first_line_drug,
-                    "status": "discontinued",
-                    "reason": f"{profile.trial_outcome} response",
+                    "status": "active",
                 }
             ],
-            # EPISODIC memory: the member's own documented treatment response
-            "treatment_responses": [
-                {
-                    "drug": profile.first_line_drug,
-                    "duration_months": profile.trial_months,
-                    "outcome": profile.trial_outcome,
-                    "notes": treatment_notes,
-                    "documented_by": profile.managing_provider,
-                    "documented_on": _iso(documented_on),
-                }
-            ],
+            # EPISODIC memory: the member's own documented treatment responses.
+            # Empty at Phase 0 — the outcome assessment is written in Phase 1.
+            "treatment_responses": [],
         },
+        # No considered biologic yet — that is set when the inadequate response is
+        # documented (Phase 1). Only the managing provider is known at baseline.
         "current_care_plan": {
-            "considering_therapy": profile.considered_therapy,
+            "considering_therapy": None,
             "managing_provider": profile.managing_provider,
         },
         # Small computed cross-domain summary: "where is this member now?"
+        # Baseline is a PRE-decision state: the member is still on first-line
+        # therapy, with no documented response, no considered biologic, and no
+        # authorization filed. Phase 1-3 produce all of that.
         "summary": {
             "active_condition_count": 1,
-            "open_authorization_count": 1,
-            "last_authorization_status": _status_for_case(profile.case_type),
+            "open_authorization_count": 0,
+            "last_authorization_status": "none",
             "updated_at": _iso_ts(now),
         },
         "updated_at": _iso_ts(now),
     }
 
 
-def _status_for_case(case_type: str) -> str:
-    return {
-        "clean_approval": "approved",
-        "human_review": "pending_review",
-        "denial": "pending_review",
-    }.get(case_type, "pending")
-
-
-def _auth_id(profile: PatientProfile) -> str:
+def _audit_id(profile: PatientProfile, suffix: str) -> str:
     numeric = "".join(ch for ch in profile.member_id if ch.isdigit())[-5:]
-    return f"AUTH-{numeric}"
+    return f"AUD-{numeric}-{suffix}"
 
 
-def build_authorization(profile: PatientProfile, comparable_claim_id: str | None) -> dict:
-    """Build the authorization document, shaped by the profile's case_type."""
-    now = datetime.now(timezone.utc)
-    min_months = 6  # mirrors the guideline step-therapy gate
-    step_met = profile.trial_months >= min_months
+def build_enrollment_audit(profile: PatientProfile) -> dict:
+    """The Phase 0 enrollment audit entry (workflow step 1a).
 
-    context: list[str] = []
-    context.append(
-        f"step therapy: {min_months} months {profile.first_line_drug} required — "
-        f"{profile.trial_months} months documented, "
-        f"{'satisfied' if step_met else 'NOT satisfied'}"
-    )
-    if profile.trial_gap:
-        context.append(
-            f"pharmacy gap ({profile.trial_gap.duration_days} days) explained: "
-            f"{profile.trial_gap.clinical_reason}"
-        )
-    if comparable_claim_id:
-        context.append(
-            f"comparable case {comparable_claim_id}: approved, similar presentation"
-        )
-    context.append(
-        f"formulary: {profile.plan_tier} tier, prior auth required — "
-        f"{'criteria met' if step_met else 'criteria not met'}"
-    )
-
-    base = {
-        "_id": _auth_id(profile),
+    Deterministic `_id` and enrollment-dated timestamp so it is idempotent on
+    re-seed and restored on reset, and so it always sorts first in the trail.
+    """
+    return {
+        "_id": _audit_id(profile, "enroll"),
         "member_id": profile.member_id,
-        "requested_service": f"biologic therapy - {profile.considered_therapy}",
-        "created_at": _iso_ts(now),
-        "decision_trace": {
-            "context_assembled": context,
-            "guideline_version": profile.guideline_id,
-        },
+        "agent": "enrollment_system",
+        "action": "member created",
+        "fields_accessed": [
+            "plan_id",
+            "eligibility",
+            "demographics",
+            "clinical_history",
+            "current_care_plan",
+        ],
+        "related_authorization": None,
+        "timestamp": _iso_ts(_parse(profile.enrollment_date)),
     }
-
-    if profile.case_type == "clean_approval":
-        base["status"] = "approved"
-        base["decision_trace"]["reasoning"] = (
-            "Step therapy satisfied."
-            + (" Gap explained by documented med hold." if profile.trial_gap else "")
-            + " Comparable case supports approval."
-        )
-        base["decision_trace"]["agent_confidence"] = 0.93
-        base["review"] = {
-            "routed_to_human": False,
-            "final_decision_maker": "agent",
-            "closed_by": "pathway_agent",
-            "closed_at": _iso_ts(now),
-        }
-    elif profile.case_type == "human_review":
-        base["status"] = "pending_review"
-        base["decision_trace"]["reasoning"] = (
-            "Ambiguous presentation with comorbidities; no clean comparable case. "
-            "Confidence below guideline threshold — routed to medical director."
-        )
-        base["decision_trace"]["agent_confidence"] = 0.71
-        base["review"] = {
-            "routed_to_human": True,
-            "final_decision_maker": "medical_director",
-            "closed_by": None,
-            "closed_at": None,
-        }
-    else:  # denial
-        base["status"] = "pending_review"
-        base["decision_trace"]["reasoning"] = (
-            f"Step therapy not satisfied ({profile.trial_months} of {min_months} "
-            "months). Denial recommended — a medical director must make the final "
-            "call. Agents never issue a denial alone."
-        )
-        base["decision_trace"]["agent_confidence"] = 0.88
-        base["review"] = {
-            "routed_to_human": True,
-            "final_decision_maker": "medical_director",
-            "closed_by": None,
-            "closed_at": None,
-        }
-
-    return base
 
 
 def build_bundle(profile: PatientProfile) -> dict:
-    """Build all documents for a profile as a single bundle."""
-    claims = build_claims(profile)
-    # Use an earlier approved pharmacy/biologic-adjacent claim as the comparable
-    # precedent when the case is a clean approval.
-    comparable = claims[-1]["_id"] if claims and profile.case_type == "clean_approval" else None
+    """Build the baseline documents for a profile.
+
+    Baseline = member + adjudicated claims history + the enrollment audit entry.
+    No authorization: the secukinumab request has not been filed at Phase 0, and
+    its decision (trace, confidence, close/route) is the runtime output the demo
+    generates in Phase 3. The profile's `case_type` still declares which scenario
+    this member represents, but the seed no longer pre-computes the answer.
+    """
     return {
         "member": build_member(profile),
-        "claims": claims,
-        "authorization": build_authorization(profile, comparable),
+        "claims": build_claims(profile),
+        "audit": [build_enrollment_audit(profile)],
     }

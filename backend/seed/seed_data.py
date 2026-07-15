@@ -8,7 +8,7 @@ Run as a module from the `backend/` directory:
 Seeding is idempotent (replace-by-_id upserts), so it is safe to re-run. The
 `--reset` flag wipes the seeded collections first for a clean slate.
 
-Requires a working MongoDB connection via the usual env vars 
+Requires a working MongoDB connection via the following env vars 
     1. MONGODB_URI,
     2. DATABASE_NAME, 
     3. APP_NAME 
@@ -23,6 +23,7 @@ from authorizations import AuthorizationRepository
 from claims import ClaimRepository
 from guidelines import GuidelineRepository
 from plans import PlanRepository
+from audit.repository import AuditRepository
 from seed.generators import ALL_PROFILES, GUIDELINES, PLANS, build_bundle
 
 
@@ -34,9 +35,10 @@ def seed(reset: bool = False):
     claims = ClaimRepository(connector)
     guidelines = GuidelineRepository(connector)
     plans = PlanRepository(connector)
+    audit = AuditRepository(connector)
 
     if reset:
-        for repo in (members, authorizations, claims, guidelines, plans):
+        for repo in (members, authorizations, claims, guidelines, plans, audit):
             deleted = repo.delete_all()
             print(f"  reset {repo.collection_name}: removed {deleted} docs")
 
@@ -45,16 +47,16 @@ def seed(reset: bool = False):
     guidelines.upsert_many(GUIDELINES)
     print(f"seeded {len(PLANS)} plans, {len(GUIDELINES)} guidelines")
 
-    # Per-member data
+    # Per-member data. Baseline is pre-decision: member + claims history only.
+    # No authorization is seeded — the demo (Phase 1-3) files and decides it.
     for profile in ALL_PROFILES:
         bundle = build_bundle(profile)
         members.upsert(bundle["member"])
         claims.upsert_many(bundle["claims"])
-        authorizations.upsert(bundle["authorization"])
+        audit.upsert_many(bundle["audit"])
         print(
             f"seeded {profile.member_id} ({profile.name}): "
-            f"{len(bundle['claims'])} claims, 1 authorization "
-            f"[{profile.case_type}]"
+            f"{len(bundle['claims'])} claims, {len(bundle['audit'])} audit [{profile.case_type}]"
         )
 
     print("done.")

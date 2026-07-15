@@ -1,6 +1,10 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+
+from db.mdb import close_connector
 
 # Import routers from each domain
 from members.routes import router as members_router
@@ -9,13 +13,24 @@ from claims.routes import router as claims_router
 from guidelines.routes import router as guidelines_router
 from audit.routes import router as audit_router
 from plans.routes import router as plans_router
+from admin.routes import router as admin_router
 
 load_dotenv()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # The shared MongoClient is created lazily on first request via get_connector().
+    yield
+    # Close the connection pool cleanly on shutdown.
+    close_connector()
+
 
 app = FastAPI(
     title="Care Coordination Backend",
     description="API for member care coordination, continuous authorization, and clinical decision support",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -48,3 +63,4 @@ app.include_router(claims_router)
 app.include_router(guidelines_router)
 app.include_router(audit_router)
 app.include_router(plans_router)
+app.include_router(admin_router)

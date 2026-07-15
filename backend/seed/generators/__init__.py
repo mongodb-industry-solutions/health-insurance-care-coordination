@@ -3,7 +3,7 @@ from .member_generator import (
     build_bundle,
     build_member,
     build_claims,
-    build_authorization,
+    build_enrollment_audit,
 )
 from .guidelines import GUIDELINES
 from .plans import PLANS
@@ -15,6 +15,6 @@ __all__ = [
     "build_bundle",
     "build_member",
     "build_claims",
-    "build_authorization",
+    "build_enrollment_audit",
     "GUIDELINES",
 ]
