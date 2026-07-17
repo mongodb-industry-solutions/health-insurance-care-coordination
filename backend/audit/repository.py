@@ -19,7 +19,8 @@ class AuditRepository(Repository):
     collection_name = Collections.AUDIT_LOG
 
     def record(self, member_id, agent, action, fields_accessed=None,
-               related_authorization=None):
+               related_authorization=None, related_note=None, related_medication=None,
+               related_guideline=None):
         # String _id and ISO-string timestamp so entries match AuditLogEntry and
         # serialize cleanly over the API. ISO timestamps also sort chronologically.
         entry = {
@@ -29,6 +30,9 @@ class AuditRepository(Repository):
             "action": action,
             "fields_accessed": fields_accessed or [],
             "related_authorization": related_authorization,
+            "related_note": related_note,
+            "related_medication": related_medication,
+            "related_guideline": related_guideline,
             "timestamp": _now_iso(),
         }
         return self.insert(entry)

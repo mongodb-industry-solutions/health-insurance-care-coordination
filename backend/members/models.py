@@ -28,10 +28,25 @@ class TreatmentResponse(BaseModel):
     documented_on: str
 
 
+class ClinicalNote(BaseModel):
+    """A narrative clinical note from a visit or event.
+
+    Note *content* lives here on the member record (the continuous clinical
+    context an agent reads), not in the audit log. The audit log only records
+    *that* a note was written (via `related_note` pointing back at `note_id`).
+    """
+    note_id: str
+    date: str
+    author: str
+    type: str
+    note: str
+
+
 class ClinicalHistory(BaseModel):
     diagnoses: List[Diagnosis]
     medications: List[Medication]
     treatment_responses: List[TreatmentResponse]
+    clinical_notes: List[ClinicalNote] = []
 
 
 class Eligibility(BaseModel):
@@ -51,6 +66,9 @@ class Demographics(BaseModel):
 class CurrentCarePlan(BaseModel):
     # Not set until the inadequate first-line response is documented (Phase 1).
     considering_therapy: Optional[str] = None
+    # Set when an authorization for the therapy is finally approved (Phase 3);
+    # considering_therapy is cleared at that point.
+    approved_therapy: Optional[str] = None
     managing_provider: str
 
 

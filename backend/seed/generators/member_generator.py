@@ -31,12 +31,83 @@ def _entitled_tier(plan: dict) -> str:
     return "specialty" if tiers.get("specialty", {}).get("covered") else "standard"
 
 
+def _iso(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%d")
+
+
 def _iso_ts(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _parse(date_str: str) -> datetime:
     return datetime.strptime(date_str, "%Y-%m-%d")
+
+
+def _trial_dates(profile: PatientProfile):
+    """Anchor dates shared by claims, notes and responses (keeps them aligned)."""
+    start = _parse(profile.enrollment_date)
+    dx_date = start + timedelta(days=14)
+    trial_start = dx_date + timedelta(days=14)
+    return start, dx_date, trial_start
+
+
+def _note_id(profile: PatientProfile, suffix: str) -> str:
+    numeric = "".join(ch for ch in profile.member_id if ch.isdigit())[-5:]
+    return f"NOTE-{numeric}-{suffix}"
+
+
+def build_clinical_notes(profile: PatientProfile) -> list[dict]:
+    """Narrative visit notes accrued during Phase 0.
+
+    Content lives on the member (not the audit log). Includes the diagnosis note
+    and, when the trial had a documented hold, the medication-hold note that
+    Phase 2's verification agent later retrieves to explain the refill gap.
+    """
+    _, dx_date, trial_start = _trial_dates(profile)
+    notes = [
+        {
+            "note_id": _note_id(profile, "dx"),
+            "date": _iso(dx_date),
+            "author": profile.managing_provider,
+            "type": "diagnosis",
+            "note": (
+                f"Diagnosed {profile.diagnosis_display} ({profile.diagnosis_code}). "
+                f"Initiating {profile.first_line_drug}."
+            ),
+        }
+    ]
+    if profile.trial_gap:
+        gap_start = trial_start + timedelta(days=profile.trial_gap.start_offset_days)
+        notes.append({
+            "note_id": _note_id(profile, "hold"),
+            "date": _iso(gap_start),
+            "author": profile.managing_provider,
+            "type": "medication_hold",
+            "note": profile.trial_gap.clinical_reason,
+        })
+    return notes
+
+
+def build_interim_response(profile: PatientProfile) -> dict:
+    """An interim 'ongoing' treatment response — the trial being monitored.
+
+    Neutral by design: it documents that the member is on therapy and being
+    followed, NOT that it has failed. The 'inadequate' assessment is a Phase 1
+    output, written when Dr. Patel documents the response.
+    """
+    _, _, trial_start = _trial_dates(profile)
+    months = min(3, profile.trial_months)
+    return {
+        "drug": profile.first_line_drug,
+        "duration_months": months,
+        "outcome": "ongoing",
+        "notes": (
+            f"Partial symptom control on {profile.first_line_drug}; "
+            "continuing therapy and monitoring."
+        ),
+        "documented_by": profile.managing_provider,
+        "documented_on": _iso(trial_start + timedelta(days=30 * months)),
+    }
 
 
 def _claim_id(profile: PatientProfile, seq: int) -> str:
@@ -189,8 +260,11 @@ def build_member(profile: PatientProfile) -> dict:
                 }
             ],
             # EPISODIC memory: the member's own documented treatment responses.
-            # Empty at Phase 0 — the outcome assessment is written in Phase 1.
-            "treatment_responses": [],
+            # At Phase 0 there is one interim 'ongoing' assessment (trial being
+            # monitored). Phase 1 adds the conclusive 'inadequate' assessment.
+            "treatment_responses": [build_interim_response(profile)],
+            # Narrative visit notes — clinical content lives here on the member.
+            "clinical_notes": build_clinical_notes(profile),
         },
         # No considered biologic yet — that is set when the inadequate response is
         # documented (Phase 1). Only the managing provider is known at baseline.
@@ -236,14 +310,59 @@ def build_enrollment_audit(profile: PatientProfile) -> dict:
             "current_care_plan",
         ],
         "related_authorization": None,
+        "related_note": None,
         "timestamp": _iso_ts(_parse(profile.enrollment_date)),
     }
+
+
+def build_note_audits(profile: PatientProfile) -> list[dict]:
+    """Workflow step 2a: one 'clinical note recorded' entry per clinical note.
+
+    The audit records *that* a note was written and points at it via
+    `related_note` — the note's content stays on the member record.
+    """
+    audits = []
+    for i, note in enumerate(build_clinical_notes(profile), start=1):
+        audits.append({
+            "_id": _audit_id(profile, f"note-{i}"),
+            "member_id": profile.member_id,
+            "agent": "ehr_integration",
+            "action": "clinical note recorded",
+            "fields_accessed": ["clinical_history.clinical_notes"],
+            "related_authorization": None,
+            "related_note": note["note_id"],
+            "timestamp": _iso_ts(_parse(note["date"])),
+        })
+    return audits
+
+
+def build_medication_audits(profile: PatientProfile) -> list[dict]:
+    """Workflow step 3a: the 'medication updated' entry for the initial prescription.
+
+    Dated to when the first-line trial's first fill begins. Refills are captured
+    in the claims timeline and don't change the medications array, so only the
+    initial prescription produces a medication-update event. `related_medication`
+    points at the drug (RxNorm code) the event touched.
+    """
+    _, _, trial_start = _trial_dates(profile)
+    return [{
+        "_id": _audit_id(profile, "med-1"),
+        "member_id": profile.member_id,
+        "agent": "ehr_integration",
+        "action": "medication updated",
+        "fields_accessed": ["clinical_history.medications"],
+        "related_authorization": None,
+        "related_note": None,
+        "related_medication": profile.first_line_rxnorm,
+        "timestamp": _iso_ts(trial_start),
+    }]
 
 
 def build_bundle(profile: PatientProfile) -> dict:
     """Build the baseline documents for a profile.
 
-    Baseline = member + adjudicated claims history + the enrollment audit entry.
+    Baseline = member + adjudicated claims history + the accrued audit trail
+    (enrollment + one entry per clinical note + the initial-prescription entry).
     No authorization: the secukinumab request has not been filed at Phase 0, and
     its decision (trace, confidence, close/route) is the runtime output the demo
     generates in Phase 3. The profile's `case_type` still declares which scenario
@@ -252,5 +371,9 @@ def build_bundle(profile: PatientProfile) -> dict:
     return {
         "member": build_member(profile),
         "claims": build_claims(profile),
-        "audit": [build_enrollment_audit(profile)],
+        "audit": (
+            [build_enrollment_audit(profile)]
+            + build_note_audits(profile)
+            + build_medication_audits(profile)
+        ),
     }

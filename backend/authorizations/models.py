@@ -24,8 +24,10 @@ class Authorization(BaseModel):
     requested_service: str
     status: str
     created_at: str
-    decision_trace: DecisionTrace
-    review: Review
+    # A freshly filed authorization is `pending` with no decision yet; the trace
+    # and review are populated when it is processed (Phase 3, step 2).
+    decision_trace: Optional[DecisionTrace] = None
+    review: Optional[Review] = None
 
     class Config:
         populate_by_name = True

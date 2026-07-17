@@ -1,6 +1,7 @@
 """Business logic for clinical guidelines (procedural and taxonomic memory)."""
 
 from db.mdb import get_connector
+from audit.repository import AuditRepository
 from .repository import GuidelineRepository
 
 
@@ -12,15 +13,34 @@ class GuidelineService:
     """
 
     def __init__(self, connector=None):
-        self.repository = GuidelineRepository(connector or get_connector())
+        connector = connector or get_connector()
+        self.repository = GuidelineRepository(connector)
+        # Cross-cutting audit of agent reads (see MemberService for the rationale).
+        self.audit = AuditRepository(connector)
 
-    def get_guideline_for_condition(self, condition_code: str) -> dict:
+    def get_guideline_for_condition(
+        self, condition_code: str, agent: str = None, member_id: str = None
+    ) -> dict:
         """Retrieve the latest guideline for a condition.
 
         Returns taxonomic classification and procedural criteria that agents
-        use to evaluate medical necessity.
+        use to evaluate medical necessity. Phase 1, step 4.
+
+        Guidelines are reference data, but a read done as part of an agent's work
+        on a case is audited against that member (step 4a). Logging requires both
+        `agent` and `member_id`; `related_guideline` records the exact version
+        consulted — the CMS decision trace needs that.
         """
-        return self.repository.latest_for_condition(condition_code)
+        guideline = self.repository.latest_for_condition(condition_code)
+        if guideline and agent and member_id:
+            self.audit.record(
+                member_id=member_id,
+                agent=agent,
+                action="read guideline",
+                fields_accessed=["criteria", "classification", "confidence_threshold"],
+                related_guideline=guideline.get("_id"),
+            )
+        return guideline
 
     def get_all_guidelines_for_condition(self, condition_code: str) -> list:
         """Retrieve all guideline versions for a condition (newest first)."""

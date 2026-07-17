@@ -13,7 +13,8 @@ class MemberRepository(Repository):
 
     def get_clinical_history(self, member_id):
         doc = self.collection.find_one(
-            {"_id": member_id}, {"clinical_history": 1, "eligibility": 1}
+            {"_id": member_id},
+            {"clinical_history": 1, "eligibility": 1, "current_care_plan": 1},
         )
         return doc
 

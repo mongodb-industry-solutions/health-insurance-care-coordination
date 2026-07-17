@@ -17,14 +17,20 @@ def get_guideline_service(
 
 @router.get("/condition/{condition_code}", response_model=GuidelineResponse)
 async def get_guideline_for_condition(
-    condition_code: str, service: GuidelineService = Depends(get_guideline_service)
+    condition_code: str,
+    agent: str = None,
+    member_id: str = None,
+    service: GuidelineService = Depends(get_guideline_service),
 ):
     """Retrieve the latest guideline for a condition.
 
     Returns taxonomic classification and procedural criteria that agents
-    use to evaluate medical necessity.
+    use to evaluate medical necessity. Pass both `agent` and `member_id` to
+    record the read in that member's audit trail (step 4a).
     """
-    guideline = service.get_guideline_for_condition(condition_code)
+    guideline = service.get_guideline_for_condition(
+        condition_code, agent=agent, member_id=member_id
+    )
     if not guideline:
         raise HTTPException(
             status_code=404,

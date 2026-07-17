@@ -4,7 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from db.mdb import MongoDBConnector, get_connector
 from .service import ClaimService
-from .models import Claim, ComparableClaimsResponse, MemberClaimsResponse, ClaimsList
+from .models import (
+    Claim,
+    ComparableClaimsResponse,
+    MemberClaimsResponse,
+    ClaimsList,
+    RefillGapsResponse,
+)
 
 router = APIRouter(prefix="/api/claims", tags=["claims"])
 
@@ -15,14 +21,21 @@ def get_claim_service(connector: MongoDBConnector = Depends(get_connector)) -> C
 
 @router.get("/comparable", response_model=ComparableClaimsResponse)
 async def find_comparable_claims(
-    service_name: str, diagnosis: str, service: ClaimService = Depends(get_claim_service)
+    service_name: str,
+    diagnosis: str,
+    agent: str = None,
+    member_id: str = None,
+    service: ClaimService = Depends(get_claim_service),
 ):
-    """Find prior adjudicated claims with the same service and diagnosis.
+    """Find comparable precedent — other members' approved claims for the same
+    service and diagnosis (episodic memory).
 
-    Used as episodic memory: shows precedent of similar treatments for
-    similar presentations.
+    Pass both `agent` and `member_id` to record the read in that member's audit
+    trail (step 6a); `member_id` also excludes the member from their own results.
     """
-    claims = service.find_comparable_cases(service_name, diagnosis)
+    claims = service.find_comparable_cases(
+        service_name, diagnosis, agent=agent, member_id=member_id
+    )
     return {
         "query": {"service": service_name, "diagnosis": diagnosis},
         "count": len(claims),
@@ -41,6 +54,20 @@ async def get_member_claims(
         "claim_count": len(claims),
         "claims": claims,
     }
+
+
+@router.get("/member/{member_id}/refill-gaps", response_model=RefillGapsResponse)
+async def detect_refill_gaps(
+    member_id: str,
+    drug: str = None,
+    agent: str = None,
+    service: ClaimService = Depends(get_claim_service),
+):
+    """Phase 2, step 1: detect breaks in medication refill cadence from the
+    pharmacy claims. Pass `agent` (e.g. `verification_agent`) to record the
+    detection in the audit trail (step 1a).
+    """
+    return service.detect_refill_gaps(member_id, drug=drug, agent=agent)
 
 
 @router.get("/{claim_id}", response_model=Claim)

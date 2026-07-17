@@ -1,12 +1,14 @@
 """Business logic for authorization decisions and bounded authority."""
 
+import uuid
 from datetime import datetime, timezone
 
 from db.mdb import get_connector
 from .repository import AuthorizationRepository
 from members.repository import MemberRepository
 from guidelines.repository import GuidelineRepository
-from claims.repository import ClaimRepository
+from plans.repository import PlanRepository
+from claims.service import ClaimService
 from audit.repository import AuditRepository
 
 
@@ -22,208 +24,246 @@ class AuthorizationService:
         self.auth_repo = AuthorizationRepository(connector)
         self.member_repo = MemberRepository(connector)
         self.guideline_repo = GuidelineRepository(connector)
-        self.claim_repo = ClaimRepository(connector)
+        self.plan_repo = PlanRepository(connector)
+        # Sibling service (not repo) for claim analysis — reuses comparable-case
+        # and refill-gap logic instead of duplicating it here.
+        self.claim_service = ClaimService(connector)
         self.audit_repo = AuditRepository(connector)
 
-    def evaluate_authorization(
-        self,
-        member_id: str,
-        requested_service: str,
-        diagnosis_code: str,
+    def file_authorization(
+        self, member_id: str, requested_service: str
     ) -> dict:
-        """Evaluate an authorization request and create/update the authorization.
+        """Phase 3, step 1: file a formal authorization request.
 
-        Orchestrates:
-        1. Member clinical context retrieval
-        2. Applicable guideline lookup
-        3. Step therapy validation
-        4. Comparable case retrieval (episodic memory)
-        5. Decision trace assembly (for CMS compliance)
-        6. Authorization creation with bounded authority rules
-        7. Audit logging
+        Creates a minimal `pending` authorization — no decision_trace or review
+        yet; those are populated when it is processed (step 2). This is the EHR/
+        provider filing the request, not an agent decision. A unique id is used so
+        a member can hold multiple authorizations over time (no clobbering). Logs
+        the step-1a audit (`authorization filed`). Raises ValueError if the member
+        does not exist.
         """
-        # Get member context
-        member = self.member_repo.get_by_id(member_id)
-        if not member:
+        if not self.member_repo.get_by_id(member_id):
             raise ValueError(f"Member {member_id} not found")
 
-        # Get applicable guideline
-        guideline = self.guideline_repo.latest_for_condition(diagnosis_code)
-        if not guideline:
-            raise ValueError(f"No guideline found for condition {diagnosis_code}")
-
-        # Check step therapy requirement
-        step_therapy_met, step_therapy_note = self._validate_step_therapy(
-            member, guideline
-        )
-
-        # Find comparable cases (episodic memory)
-        comparable_claims = self.claim_repo.find_comparable(requested_service, diagnosis_code)
-
-        # Build decision trace (required by CMS rule)
-        decision_trace = self._build_decision_trace(
-            member,
-            guideline,
-            step_therapy_met,
-            step_therapy_note,
-            comparable_claims,
-        )
-
-        # Determine review routing (bounded authority)
-        routed_to_human, confidence = self._assess_confidence(
-            step_therapy_met, comparable_claims, guideline
-        )
-
-        # Create authorization with bounded authority rules
-        auth = self._create_authorization(
-            member_id,
-            requested_service,
-            diagnosis_code,
-            decision_trace,
-            routed_to_human,
-            confidence,
-        )
-
-        # Log the authorization decision
-        self.audit_repo.record(
-            member_id=member_id,
-            agent="pathway_agent",
-            action="evaluate_authorization",
-            fields_accessed=[
-                "clinical_history.treatment_responses",
-                "clinical_history.medications",
-                "eligibility",
-            ],
-            related_authorization=auth["_id"],
-        )
-
-        return auth
-
-    def _validate_step_therapy(self, member: dict, guideline: dict) -> tuple:
-        """Check if step therapy requirement is met.
-
-        Returns: (is_met: bool, explanation: str)
-        """
-        step_therapy_requirement = guideline.get("criteria", {}).get("step_therapy", {})
-        if not step_therapy_requirement:
-            return True, "No step therapy requirement"
-
-        required_drug = step_therapy_requirement.get("drug")
-        min_months = step_therapy_requirement.get("min_months", 6)
-
-        # Check member's treatment responses
-        treatment_responses = (
-            member.get("clinical_history", {}).get("treatment_responses", [])
-        )
-
-        for response in treatment_responses:
-            if response.get("drug") == required_drug:
-                duration = response.get("duration_months", 0)
-                if duration >= min_months:
-                    return True, f"{required_drug}: {duration} months documented, requirement met"
-                else:
-                    return False, f"{required_drug}: {duration} months documented, {min_months} required"
-
-        return False, f"No documented trial of {required_drug}"
-
-    def _build_decision_trace(
-        self,
-        member: dict,
-        guideline: dict,
-        step_met: bool,
-        step_note: str,
-        comparable_claims: list,
-    ) -> dict:
-        """Build the decision trace required by CMS Interoperability & Prior Authorization Rule.
-
-        The trace documents:
-        - What evidence was assembled
-        - Which guideline version was applied
-        - The reasoning behind the decision
-        """
-        context_assembled = [step_note]
-
-        if comparable_claims:
-            context_assembled.append(
-                f"comparable cases: {len(comparable_claims)} prior approvals with same service/diagnosis"
-            )
-
-        coverage_tier = guideline.get("criteria", {}).get("coverage_tier", "unknown")
-        context_assembled.append(f"coverage tier: {coverage_tier}")
-
-        return {
-            "context_assembled": context_assembled,
-            "guideline_version": guideline.get("_id"),
-            "guideline_effective_date": guideline.get("effective_date"),
-            "reasoning": (
-                f"Step therapy: {'satisfied' if step_met else 'not satisfied'}. "
-                f"{len(comparable_claims)} comparable case(s) found."
-            ),
-        }
-
-    def _assess_confidence(
-        self, step_met: bool, comparable_claims: list, guideline: dict
-    ) -> tuple:
-        """Assess decision confidence and whether to route to human review.
-
-        Returns: (routed_to_human: bool, confidence_score: float)
-
-        Rules:
-        - If step therapy not met → route to MD (denial recommendation)
-        - If confidence below guideline threshold → route to MD (ambiguous)
-        - Otherwise → agent can approve
-        """
-        confidence_threshold = guideline.get("confidence_threshold", 0.90)
-
-        if not step_met:
-            # Step therapy not met → denial, always route to MD
-            return True, 0.88
-
-        if not comparable_claims:
-            # No precedent → ambiguous, route to MD
-            return True, 0.71
-
-        # All criteria met and we have precedent → agent can approve
-        confidence = min(0.95, confidence_threshold)
-        return False, confidence
-
-    def _create_authorization(
-        self,
-        member_id: str,
-        requested_service: str,
-        diagnosis_code: str,
-        decision_trace: dict,
-        routed_to_human: bool,
-        confidence: float,
-    ) -> dict:
-        """Create or update an authorization with decision trace and bounded authority."""
-        # Generate auth ID from member ID
-        numeric = "".join(c for c in member_id if c.isdigit())[-5:]
-        auth_id = f"AUTH-{numeric}"
-
-        now = datetime.now(timezone.utc).isoformat() + "Z"
-
+        auth_id = f"AUTH-{uuid.uuid4().hex[:10]}"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         authorization = {
             "_id": auth_id,
             "member_id": member_id,
             "requested_service": requested_service,
-            "diagnosis_code": diagnosis_code,
-            "status": "approved" if not routed_to_human else "pending_review",
+            "status": "pending",
             "created_at": now,
-            "decision_trace": {
-                **decision_trace,
-                "agent_confidence": confidence,
-            },
-            "review": {
-                "routed_to_human": routed_to_human,
-                "final_decision_maker": "medical_director" if routed_to_human else "agent",
-                "closed_by": None if routed_to_human else "pathway_agent",
-                "closed_at": None if routed_to_human else now,
-            },
+            "decision_trace": None,
+            "review": None,
         }
-
         self.auth_repo.upsert(authorization)
+
+        self.audit_repo.record(
+            member_id=member_id,
+            agent="ehr_integration",
+            action="authorization filed",
+            fields_accessed=["authorizations"],
+            related_authorization=auth_id,
+        )
         return authorization
+
+    def process_authorization(self, member_id: str) -> dict:
+        """Phase 3, step 2: process the member's pending authorization.
+
+        Deterministically computes the decision from the member's CURRENT record
+        (which the pathway + verification agents already shaped), the guideline, and
+        comparable precedent, then applies bounded authority. Populates the
+        decision_trace with a *computed* confidence (no faked literals), updates the
+        authorization, recomputes the member summary (2a), and audits the decision
+        (2b). Raises ValueError if there is no pending authorization.
+        """
+        auth = self.auth_repo.find_pending_by_member(member_id)
+        if not auth:
+            raise ValueError(f"No pending authorization for member {member_id}")
+        member = self.member_repo.get_by_id(member_id)
+        if not member:
+            raise ValueError(f"Member {member_id} not found")
+
+        # --- Assemble the facts (from the current record) --------------------
+        requested_service = auth["requested_service"]
+        therapy = (
+            member.get("current_care_plan", {}).get("considering_therapy")
+            or requested_service.replace("biologic therapy - ", "")
+        )
+        diagnoses = member.get("clinical_history", {}).get("diagnoses", [])
+        diagnosis_code = diagnoses[0]["code"] if diagnoses else None
+        guideline = self.guideline_repo.latest_for_condition(diagnosis_code) or {}
+
+        eligible = member.get("eligibility", {}).get("status") == "active"
+        therapy_tier = guideline.get("classification", {}).get(therapy, {}).get("tier")
+        tier_covered = self._tier_covered(member, therapy_tier)
+        step_met, step_note = self._step_therapy_met(member, guideline)
+        comparable = self.claim_service.find_comparable_cases(
+            requested_service, diagnosis_code, member_id=member_id
+        )
+        gaps = self.claim_service.detect_refill_gaps(member_id)["gaps"]
+        unresolved_gap = bool(gaps) and not self._has_gap_review(member)
+        threshold = guideline.get("confidence_threshold", 0.90)
+
+        # --- Decide (transparent, computed) ----------------------------------
+        status, routed_to_human, confidence, reasoning = self._decide(
+            eligible, therapy_tier, tier_covered, step_met,
+            len(comparable), unresolved_gap, threshold,
+        )
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        auth["status"] = status
+        auth["decision_trace"] = {
+            "context_assembled": self._context(
+                eligible, therapy_tier, tier_covered, member.get("plan_id"),
+                step_note, comparable, gaps, unresolved_gap,
+            ),
+            "guideline_version": guideline.get("_id", "unknown"),
+            "reasoning": reasoning,
+            "agent_confidence": confidence,
+        }
+        auth["review"] = {
+            "routed_to_human": routed_to_human,
+            "final_decision_maker": "medical_director" if routed_to_human else "agent",
+            "closed_by": None if routed_to_human else "pathway_agent",
+            "closed_at": None if routed_to_human else now,
+        }
+        self.auth_repo.upsert(auth)
+
+        if status == "approved" and not routed_to_human:
+            self._mark_approved_therapy(member, therapy)
+        self._recompute_summary(member)  # 2a
+        self.audit_repo.record(  # 2b
+            member_id=member_id,
+            agent="pathway_agent",
+            action="authorization decided",
+            fields_accessed=["authorizations", "clinical_history", "eligibility"],
+            related_authorization=auth["_id"],
+        )
+        return auth
+
+    # --- decision helpers ----------------------------------------------------
+
+    def _tier_covered(self, member: dict, therapy_tier: str) -> bool:
+        """Does the member's plan cover the tier the requested therapy sits in?"""
+        if not therapy_tier:
+            return True
+        plan = self.plan_repo.get_by_id(member.get("plan_id")) or {}
+        tiers = plan.get("coverage", {}).get("tiers", {})
+        return bool(tiers.get(therapy_tier, {}).get("covered"))
+
+    def _step_therapy_met(self, member: dict, guideline: dict) -> tuple:
+        """Step therapy is met if the LONGEST documented trial of the required drug
+        meets the minimum (uses max across entries — the trajectory may hold several
+        assessments, e.g. an interim 'ongoing' plus a later 'inadequate')."""
+        st = guideline.get("criteria", {}).get("step_therapy", {})
+        if not st:
+            return True, "no step therapy requirement"
+        drug = st.get("drug")
+        min_months = st.get("min_months", 6)
+        durations = [
+            r.get("duration_months", 0)
+            for r in member.get("clinical_history", {}).get("treatment_responses", [])
+            if r.get("drug") == drug
+        ]
+        best = max(durations) if durations else 0
+        met = best >= min_months
+        return met, (
+            f"step therapy: {drug} {best} months documented vs {min_months} required — "
+            f"{'satisfied' if met else 'NOT satisfied'}"
+        )
+
+    def _has_gap_review(self, member: dict) -> bool:
+        return any(
+            r.get("outcome") == "gap_reviewed"
+            for r in member.get("clinical_history", {}).get("treatment_responses", [])
+        )
+
+    def _decide(self, eligible, therapy_tier, tier_covered, step_met,
+                comparable_count, unresolved_gap, threshold) -> tuple:
+        """Return (status, routed_to_human, confidence, reasoning).
+
+        Hard administrative gates first (eligibility, benefit coverage) — factual
+        denials the agent can close. Then the clinical path: a computed, transparent
+        confidence gates auto-approval; clinical denials and low-confidence
+        approvals route to a human. Denials are never auto-issued on clinical
+        grounds.
+        """
+        if not eligible:
+            return ("denied", False, 0.99,
+                    "Member not eligible (coverage termed). Administrative "
+                    "determination — no clinical review required.")
+        if therapy_tier and not tier_covered:
+            return ("denied", False, 0.99,
+                    f"Plan does not cover the {therapy_tier} tier this therapy "
+                    "requires. Benefit exclusion — administrative determination.")
+
+        # Clinical path: transparent confidence from the evidence.
+        confidence = 0.0
+        if step_met:
+            confidence += 0.60
+        if tier_covered:
+            confidence += 0.15
+        confidence += min(comparable_count, 2) * 0.10
+        if unresolved_gap:
+            confidence -= 0.15
+        confidence = round(min(max(confidence, 0.0), 0.99), 2)
+
+        if not step_met:
+            return ("denied", True, confidence,
+                    "Step therapy not satisfied. Denial recommended — a medical "
+                    "director must make the final call. Agents never deny alone.")
+        if confidence >= threshold:
+            return ("approved", False, confidence,
+                    f"All criteria satisfied; confidence {confidence} >= threshold "
+                    f"{threshold}. Auto-approved.")
+        return ("pending_review", True, confidence,
+                f"Criteria met but confidence {confidence} < threshold {threshold} "
+                "(e.g. no comparable precedent, or unresolved anomaly). Routed to a "
+                "medical director.")
+
+    def _context(self, eligible, therapy_tier, tier_covered, plan_id,
+                 step_note, comparable, gaps, unresolved_gap) -> list:
+        ctx = [
+            f"eligibility: coverage {'active' if eligible else 'TERMED'}",
+            f"benefit: {therapy_tier or 'n/a'} tier "
+            f"{'covered' if tier_covered else 'NOT covered'} under plan {plan_id}",
+            step_note,
+        ]
+        if comparable:
+            ctx.append(
+                "comparable cases: "
+                + ", ".join(c["_id"] for c in comparable)
+                + " (approved, similar presentation)"
+            )
+        else:
+            ctx.append("comparable cases: none found")
+        if gaps:
+            ctx.append(
+                f"refill gap: {len(gaps)} detected — "
+                f"{'UNRESOLVED' if unresolved_gap else 'resolved'}"
+            )
+        return ctx
+
+    def _mark_approved_therapy(self, member: dict, therapy: str) -> None:
+        """On a finalized approval, reflect the approved therapy on the care plan
+        (it is no longer merely being 'considered')."""
+        cp = member.setdefault("current_care_plan", {})
+        cp["approved_therapy"] = therapy
+        cp["considering_therapy"] = None
+
+    def _recompute_summary(self, member: dict) -> None:
+        """Phase 3, step 2a: recompute the member's small cross-domain summary."""
+        auths = self.auth_repo.find_by_member(member["_id"])
+        open_count = sum(1 for a in auths if a.get("status") in ("pending", "pending_review"))
+        last_status = auths[-1]["status"] if auths else "none"
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        summary = member.setdefault("summary", {})
+        summary["open_authorization_count"] = open_count
+        summary["last_authorization_status"] = last_status
+        summary["updated_at"] = now
+        member["updated_at"] = now
+        self.member_repo.upsert(member)
 
     def get_authorization(self, auth_id: str) -> dict:
         """Retrieve a specific authorization."""
@@ -236,3 +276,80 @@ class AuthorizationService:
     def get_pending_human_review(self) -> list:
         """Retrieve all authorizations pending medical director review."""
         return self.auth_repo.find_routed_to_human()
+
+    def open_human_review(self, auth_id: str, medical_director_id: str = None) -> dict:
+        """Phase 3a, step 2/2a: assemble the brief for a medical director.
+
+        Returns the full authorization (with its decision_trace) plus the broader
+        member clinical context. When a `medical_director_id` is supplied, logs
+        `human review opened` (2a). Raises ValueError if the authorization is
+        unknown.
+        """
+        auth = self.auth_repo.get_by_id(auth_id)
+        if not auth:
+            raise ValueError(f"Authorization {auth_id} not found")
+
+        member = self.member_repo.get_by_id(auth["member_id"]) or {}
+        member_context = {
+            "member_id": auth["member_id"],
+            "demographics": member.get("demographics"),
+            "eligibility": member.get("eligibility"),
+            "clinical_history": member.get("clinical_history"),
+            "current_care_plan": member.get("current_care_plan"),
+        }
+        if medical_director_id:
+            self.audit_repo.record(
+                member_id=auth["member_id"],
+                agent=medical_director_id,
+                action="human review opened",
+                fields_accessed=["authorizations", "clinical_history", "eligibility"],
+                related_authorization=auth_id,
+            )
+        return {"authorization": auth, "member_context": member_context}
+
+    def close_authorization(
+        self, auth_id: str, medical_director_id: str, decision: str, notes: str = None
+    ) -> dict:
+        """Phase 3a, step 3/3a/3b: a medical director sets the final decision.
+
+        Only an authorization routed to a human can be human-closed (bounded
+        authority — the agent never issues the final denial). Updates status +
+        `closed_by`/`closed_at`, recomputes the member summary (3a), and audits
+        `authorization closed by human` under the director's id (3b).
+        """
+        if decision not in ("approved", "denied"):
+            raise ValueError("decision must be 'approved' or 'denied'")
+
+        auth = self.auth_repo.get_by_id(auth_id)
+        if not auth:
+            raise ValueError(f"Authorization {auth_id} not found")
+        review = auth.get("review") or {}
+        if not review.get("routed_to_human"):
+            raise ValueError("Authorization was not routed to a human; nothing to close")
+        if review.get("closed_by"):
+            raise ValueError(f"Authorization already closed by {review['closed_by']}")
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        auth["status"] = decision
+        review["closed_by"] = medical_director_id
+        review["closed_at"] = now
+        if notes:
+            review["notes"] = notes
+        auth["review"] = review
+        self.auth_repo.upsert(auth)
+
+        member = self.member_repo.get_by_id(auth["member_id"])
+        if member:
+            if decision == "approved":
+                therapy = auth.get("requested_service", "").replace("biologic therapy - ", "")
+                self._mark_approved_therapy(member, therapy)
+            self._recompute_summary(member)  # 3a
+
+        self.audit_repo.record(  # 3b
+            member_id=auth["member_id"],
+            agent=medical_director_id,
+            action="authorization closed by human",
+            fields_accessed=["authorizations.status", "authorizations.review"],
+            related_authorization=auth_id,
+        )
+        return auth

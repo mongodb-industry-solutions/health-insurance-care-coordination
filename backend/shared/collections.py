@@ -12,3 +12,4 @@ class Collections:
     GUIDELINES = "guidelines"
     AUDIT_LOG = "audit_log"
     PLANS = "plans"
+    NOTIFICATIONS = "notifications"

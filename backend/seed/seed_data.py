@@ -24,7 +24,7 @@ from claims import ClaimRepository
 from guidelines import GuidelineRepository
 from plans import PlanRepository
 from audit.repository import AuditRepository
-from seed.generators import ALL_PROFILES, GUIDELINES, PLANS, build_bundle
+from seed.generators import ALL_PROFILES, GUIDELINES, PLANS, PRECEDENT_CLAIMS, build_bundle
 
 
 def seed(reset: bool = False):
@@ -45,7 +45,12 @@ def seed(reset: bool = False):
     # Reference data (shared across members)
     plans.upsert_many(PLANS)
     guidelines.upsert_many(GUIDELINES)
-    print(f"seeded {len(PLANS)} plans, {len(GUIDELINES)} guidelines")
+    # Historical precedent claims (episodic memory for comparable-case retrieval)
+    claims.upsert_many(PRECEDENT_CLAIMS)
+    print(
+        f"seeded {len(PLANS)} plans, {len(GUIDELINES)} guidelines, "
+        f"{len(PRECEDENT_CLAIMS)} precedent claims"
+    )
 
     # Per-member data. Baseline is pre-decision: member + claims history only.
     # No authorization is seeded — the demo (Phase 1-3) files and decides it.

@@ -81,6 +81,7 @@ def register(app: App) -> None:
             backend_url = _get_backend_url()
             response = requests.get(
                 f"{backend_url}/api/members/{member_id}/clinical-context",
+                params={"agent": "pathway_agent"},  # server-side audits the read (step 3a)
                 timeout=5,
             )
             if response.status_code == 404:
@@ -91,7 +92,7 @@ def register(app: App) -> None:
             return json.dumps({"error": f"Failed to retrieve member context: {str(e)}"})
 
     @app.tool(is_local=False)
-    def get_applicable_guideline(condition_code: str) -> str:
+    def get_applicable_guideline(condition_code: str, member_id: str) -> str:
         """Retrieve the latest clinical guideline for a condition.
 
         Returns taxonomic classification and procedural criteria (step therapy
@@ -100,11 +101,13 @@ def register(app: App) -> None:
 
         Args:
             condition_code: ICD-10 diagnosis code (e.g., M06.9 for rheumatoid arthritis).
+            member_id: The member whose case this read is part of (for the audit trail).
         """
         try:
             backend_url = _get_backend_url()
             response = requests.get(
                 f"{backend_url}/api/guidelines/condition/{condition_code}",
+                params={"agent": "pathway_agent", "member_id": member_id},  # audits the read (step 4a)
                 timeout=5,
             )
             if response.status_code == 404:
@@ -115,7 +118,7 @@ def register(app: App) -> None:
             return json.dumps({"error": f"Failed to retrieve guideline: {str(e)}"})
 
     @app.tool(is_local=False)
-    def find_comparable_claims(service: str, diagnosis: str) -> str:
+    def find_comparable_claims(service: str, diagnosis: str, member_id: str) -> str:
         """Find prior adjudicated claims with the same service and diagnosis.
 
         Returns comparable cases (episodic memory) showing outcomes of similar
@@ -124,18 +127,99 @@ def register(app: App) -> None:
         Args:
             service: Service description (e.g., "biologic therapy - secukinumab").
             diagnosis: ICD-10 diagnosis code.
+            member_id: The member whose case this is for (excluded from results; audits the read).
         """
         try:
             backend_url = _get_backend_url()
             response = requests.get(
                 f"{backend_url}/api/claims/comparable",
-                params={"service_name": service, "diagnosis": diagnosis},
+                params={
+                    "service_name": service,
+                    "diagnosis": diagnosis,
+                    "agent": "pathway_agent",  # audits the read (step 6a)
+                    "member_id": member_id,
+                },
                 timeout=5,
             )
             response.raise_for_status()
             return json.dumps(response.json())
         except requests.RequestException as e:
             return json.dumps({"error": f"Failed to find comparable claims: {str(e)}"})
+
+    @app.tool(is_local=False)
+    def detect_refill_gaps(member_id: str, drug: str = "") -> str:
+        """Detect breaks in a member's medication refill cadence.
+
+        Analyzes the pharmacy claims timeline and returns any gaps where the
+        interval between consecutive fills is longer than expected (a possible
+        missed refill). Used by the verification agent to spot a gap before it is
+        mistaken for a discontinuation.
+
+        Args:
+            member_id: The member's unique ID.
+            drug: Optional drug display name (e.g. "Methotrexate") to scope the check.
+        """
+        try:
+            backend_url = _get_backend_url()
+            params = {"agent": "verification_agent"}  # audits the detection (step 1a)
+            if drug:
+                params["drug"] = drug
+            response = requests.get(
+                f"{backend_url}/api/claims/member/{member_id}/refill-gaps",
+                params=params,
+                timeout=5,
+            )
+            response.raise_for_status()
+            return json.dumps(response.json())
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Failed to detect refill gaps: {str(e)}"})
+
+    @app.tool(is_local=False)
+    def resolve_refill_gap(
+        member_id: str,
+        drug: str,
+        effective_trial_months: int,
+        conclusion: str,
+        related_note: str = "",
+    ) -> str:
+        """Attach a verification conclusion about a refill gap to the member record.
+
+        Call this after you have reviewed a detected refill gap and reasoned about
+        whether it is explained (e.g. a documented medication hold, not a
+        discontinuation). Your `conclusion` text is recorded as a treatment_response
+        so the effective trial stands and the case proceeds.
+
+        Args:
+            member_id: The member's unique ID.
+            drug: The drug whose trial had the gap (e.g. "Methotrexate").
+            effective_trial_months: The effective trial duration after accounting for the gap.
+            conclusion: Your reasoning about why the gap does or does not invalidate the trial.
+            related_note: The note_id of the clinical note that explains the gap (e.g. "NOTE-44109-hold").
+        """
+        try:
+            backend_url = _get_backend_url()
+            params = {
+                "drug": drug,
+                "effective_trial_months": effective_trial_months,
+                "conclusion": conclusion,
+            }
+            if related_note:
+                params["related_note"] = related_note
+            response = requests.post(
+                f"{backend_url}/api/members/{member_id}/gap-resolution",
+                params=params,
+                timeout=5,
+            )
+            if response.status_code == 404:
+                try:
+                    detail = response.json().get("detail", "not found")
+                except ValueError:
+                    detail = "route not found (is the backend up to date?)"
+                return json.dumps({"error": f"gap-resolution 404: {detail}"})
+            response.raise_for_status()
+            return json.dumps(response.json())
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Failed to resolve refill gap: {str(e)}"})
 
     @app.tool(is_local=False)
     def get_member_authorizations(member_id: str) -> str:
@@ -159,36 +243,70 @@ def register(app: App) -> None:
             return json.dumps({"error": f"Failed to retrieve authorizations: {str(e)}"})
 
     @app.tool(is_local=False)
-    def evaluate_authorization(
-        member_id: str,
-        requested_service: str,
-        diagnosis_code: str,
-    ) -> str:
-        """Evaluate an authorization request and create the authorization decision.
+    def file_authorization(member_id: str, requested_service: str) -> str:
+        """File a formal prior-authorization request (creates a pending authorization).
 
-        This is the main orchestration endpoint. It:
-        - Assembles member clinical context
-        - Looks up applicable guidelines
-        - Validates step therapy requirements
-        - Retrieves comparable cases (episodic memory)
-        - Builds decision trace for CMS compliance
-        - Applies bounded authority rules
-        - Logs the decision to audit trail
+        Call this before processing a decision. The request is a confirmation of the
+        case already assembled; it does not decide anything.
 
         Args:
             member_id: The member's unique ID.
-            requested_service: Service being authorized (e.g., "biologic therapy - secukinumab").
-            diagnosis_code: ICD-10 diagnosis code for the condition.
+            requested_service: The service requested (e.g. "biologic therapy - secukinumab").
         """
         try:
             backend_url = _get_backend_url()
             response = requests.post(
-                f"{backend_url}/api/authorizations/evaluate",
-                params={
-                    "member_id": member_id,
-                    "requested_service": requested_service,
-                    "diagnosis_code": diagnosis_code,
-                },
+                f"{backend_url}/api/authorizations/file",
+                params={"member_id": member_id, "requested_service": requested_service},
+                timeout=5,
+            )
+            if response.status_code == 404:
+                return json.dumps({"error": f"Member {member_id} not found"})
+            response.raise_for_status()
+            return json.dumps(response.json())
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Failed to file authorization: {str(e)}"})
+
+    @app.tool(is_local=False)
+    def notify_member(member_id: str) -> str:
+        """Send the member a plain-language notification about their latest decision.
+
+        Args:
+            member_id: The member's unique ID.
+        """
+        try:
+            backend_url = _get_backend_url()
+            response = requests.post(
+                f"{backend_url}/api/notifications/notify",
+                params={"member_id": member_id},
+                timeout=5,
+            )
+            if response.status_code == 400:
+                return json.dumps({"error": response.json().get("detail", "Bad request")})
+            response.raise_for_status()
+            return json.dumps(response.json())
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Failed to notify member: {str(e)}"})
+
+    @app.tool(is_local=False)
+    def process_authorization(member_id: str) -> str:
+        """Process the member's pending authorization and return the decision.
+
+        The system computes the decision from the member's current record, the
+        applicable guideline, and comparable precedent, applies bounded authority
+        (auto-approve only if confidence meets the guideline threshold; denials and
+        low-confidence cases route to a medical director), records the decision
+        trace, and logs the decision. Call this after the case has been assembled
+        and verified, and a formal request has been filed.
+
+        Args:
+            member_id: The member's unique ID (must have a pending authorization).
+        """
+        try:
+            backend_url = _get_backend_url()
+            response = requests.post(
+                f"{backend_url}/api/authorizations/process",
+                params={"member_id": member_id},
                 timeout=10,
             )
             if response.status_code == 400:
@@ -196,7 +314,7 @@ def register(app: App) -> None:
             response.raise_for_status()
             return json.dumps(response.json())
         except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to evaluate authorization: {str(e)}"})
+            return json.dumps({"error": f"Failed to process authorization: {str(e)}"})
 
     @app.tool(is_local=False)
     def log_agent_action(

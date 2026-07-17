@@ -13,6 +13,7 @@ from claims.routes import router as claims_router
 from guidelines.routes import router as guidelines_router
 from audit.routes import router as audit_router
 from plans.routes import router as plans_router
+from notifications.routes import router as notifications_router
 from admin.routes import router as admin_router
 
 load_dotenv()
@@ -63,4 +64,5 @@ app.include_router(claims_router)
 app.include_router(guidelines_router)
 app.include_router(audit_router)
 app.include_router(plans_router)
+app.include_router(notifications_router)
 app.include_router(admin_router)

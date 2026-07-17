@@ -12,6 +12,9 @@ class AuditLogEntry(BaseModel):
     timestamp: str
     fields_accessed: List[str]
     related_authorization: Optional[str] = None
+    related_note: Optional[str] = None
+    related_medication: Optional[str] = None
+    related_guideline: Optional[str] = None
 
     class Config:
         populate_by_name = True
