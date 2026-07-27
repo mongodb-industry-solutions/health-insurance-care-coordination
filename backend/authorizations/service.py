@@ -21,6 +21,7 @@ class AuthorizationService:
 
     def __init__(self, connector=None):
         connector = connector or get_connector()
+        self._connector = connector
         self.auth_repo = AuthorizationRepository(connector)
         self.member_repo = MemberRepository(connector)
         self.guideline_repo = GuidelineRepository(connector)
@@ -352,4 +353,16 @@ class AuthorizationService:
             fields_accessed=["authorizations.status", "authorizations.review"],
             related_authorization=auth_id,
         )
+
+        # Notify the member of the final human decision (parity with the happy
+        # path). Imported locally to avoid a module-level import cycle
+        # (notifications reads the authorization repository). A notification
+        # failure must not roll back a completed physician decision.
+        try:
+            from notifications.service import NotificationService
+
+            NotificationService(self._connector).notify_member(auth["member_id"])
+        except Exception:
+            pass
+
         return auth

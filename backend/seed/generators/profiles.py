@@ -68,6 +68,13 @@ class PatientProfile:
     eligibility_status: str = "active"      # "active" | "termed"
     coverage_end_date: str | None = None    # ISO date; set when coverage lapsed
 
+    # Additional standing diagnoses beyond the primary condition. Each is a full
+    # diagnosis entry ({code, system, display, status}) merged into the member's
+    # clinical_history.diagnoses[]. Kept off the prior-auth path (which keys off
+    # the primary diagnosis_code); exists so other consumers — e.g. a care-gaps
+    # platform — can read comorbidities from the same member object.
+    comorbidities: list[dict] = field(default_factory=list)
+
     # Small notes that make the narrative legible in the data
     tags: list[str] = field(default_factory=list)
 
@@ -102,6 +109,16 @@ MARIA = PatientProfile(
     plan_tier="specialty",
     guideline_id="CMG-RA-2026.3",
     case_type="clean_approval",
+    # Hypertension comorbidity — inert for prior auth, but makes Maria eligible
+    # for cardiovascular care-gap measures (e.g. HEDIS CBP) in the care-gaps demo.
+    comorbidities=[
+        {
+            "code": "I10",
+            "system": "ICD-10",
+            "display": "Essential (primary) hypertension",
+            "status": "active",
+        }
+    ],
     tags=["rheumatoid-arthritis", "step-therapy-satisfied", "explained-gap"],
 )
 

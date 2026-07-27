@@ -246,7 +246,10 @@ def build_member(profile: PatientProfile) -> dict:
                     "system": profile.diagnosis_system,
                     "display": profile.diagnosis_display,
                     "status": "active",
-                }
+                },
+                # Any standing comorbidities (e.g. hypertension) — read by other
+                # consumers such as the care-gaps platform; inert for prior auth.
+                *profile.comorbidities,
             ],
             # First-line therapy is still ACTIVE at Phase 0 — she is currently on
             # methotrexate. It is not marked discontinued/inadequate until Dr. Patel

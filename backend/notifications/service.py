@@ -42,9 +42,14 @@ class NotificationService:
         name = member.get("demographics", {}).get("name", "Member")
         service = auth.get("requested_service", "the requested treatment")
         status = auth.get("status", "pending")
-        routed = bool((auth.get("review") or {}).get("routed_to_human"))
+        review = auth.get("review") or {}
+        # A case is only "under review" while it is routed AND not yet closed by a
+        # human. Once the medical director closes it, routed_to_human stays true but
+        # closed_by is set — that is a final decision, not a pending review.
+        pending_human = bool(review.get("routed_to_human")) and not review.get("closed_by")
+        human_closed = bool(review.get("closed_by"))
 
-        if routed:
+        if pending_human:
             message = (
                 f"{name}, your request for {service} is being reviewed by a medical "
                 "director. We'll let you know as soon as a decision is made."
@@ -54,6 +59,12 @@ class NotificationService:
                 f"Good news, {name} — your authorization for {service} has been "
                 "approved. Your pharmacy has been notified and your prescription "
                 "should be ready shortly."
+            )
+        elif status == "denied" and human_closed:
+            message = (
+                f"{name}, after review by a medical director, {service} could not be "
+                "approved at this time. Please contact member services to discuss "
+                "next steps, including your right to appeal."
             )
         elif status == "denied":
             message = (

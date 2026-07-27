@@ -16,6 +16,9 @@ class Review(BaseModel):
     final_decision_maker: str
     closed_by: Optional[str] = None
     closed_at: Optional[str] = None
+    # The medical director's closing rationale (Phase 3a). Part of the decision
+    # record under CMS-0057-F, so it must survive serialization to API clients.
+    notes: Optional[str] = None
 
 
 class Authorization(BaseModel):
