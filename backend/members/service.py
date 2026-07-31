@@ -119,14 +119,20 @@ class MemberService:
 
         now = datetime.now(timezone.utc)
         clinical = member.setdefault("clinical_history", {})
-        clinical.setdefault("treatment_responses", []).append({
+        entry = {
             "drug": drug,
             "duration_months": effective_trial_months,
             "outcome": "gap_reviewed",
             "notes": conclusion,
             "documented_by": "verification_agent",
             "documented_on": now.strftime("%Y-%m-%d"),
-        })
+        }
+        # Provenance: cite the clinical note that explained the gap so the
+        # conclusion can be traced back to its source documentation (the audit
+        # trail no longer carries this — it lives on the record).
+        if related_note:
+            entry["related_note"] = related_note
+        clinical.setdefault("treatment_responses", []).append(entry)
         member["updatedAt"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         self.repository.upsert(member)
         return member

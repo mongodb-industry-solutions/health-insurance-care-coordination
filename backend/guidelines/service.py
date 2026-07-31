@@ -1,7 +1,6 @@
 """Business logic for clinical guidelines (procedural and taxonomic memory)."""
 
 from db.mdb import get_connector
-from audit.repository import AuditRepository
 from .repository import GuidelineRepository
 
 
@@ -15,32 +14,15 @@ class GuidelineService:
     def __init__(self, connector=None):
         connector = connector or get_connector()
         self.repository = GuidelineRepository(connector)
-        # Cross-cutting audit of agent reads (see MemberService for the rationale).
-        self.audit = AuditRepository(connector)
 
-    def get_guideline_for_condition(
-        self, condition_code: str, agent: str = None, member_id: str = None
-    ) -> dict:
-        """Retrieve the latest guideline for a condition.
+    def get_guideline_for_condition(self, condition_code: str) -> dict:
+        """Retrieve the latest guideline for a condition (Phase 1, step 4).
 
-        Returns taxonomic classification and procedural criteria that agents
-        use to evaluate medical necessity. Phase 1, step 4.
-
-        Guidelines are reference data, but a read done as part of an agent's work
-        on a case is audited against that member (step 4a). Logging requires both
-        `agent` and `member_id`; `related_guideline` records the exact version
-        consulted — the CMS decision trace needs that.
+        Returns taxonomic classification and procedural criteria that agents use to
+        evaluate medical necessity. The exact version consulted is captured on the
+        decision trace's `contextSnapshot.guidelineRef` when the case is processed.
         """
-        guideline = self.repository.latest_for_condition(condition_code)
-        if guideline and agent and member_id:
-            self.audit.record(
-                member_id=member_id,
-                agent=agent,
-                action="read guideline",
-                fields_accessed=["criteria", "classification", "confidence_threshold"],
-                related_guideline=guideline.get("_id"),
-            )
-        return guideline
+        return self.repository.latest_for_condition(condition_code)
 
     def get_all_guidelines_for_condition(self, condition_code: str) -> list:
         """Retrieve all guideline versions for a condition (newest first)."""
@@ -54,13 +36,41 @@ class GuidelineService:
         """Retrieve all guidelines."""
         return self.repository.find()
 
-    def evaluate_coverage_tier(self, guideline: dict, requested_service: str) -> dict:
-        """Evaluate whether a requested service meets coverage tier requirements."""
+    @staticmethod
+    def _therapy_key(guideline: dict, requested: str) -> str:
+        """Resolve the classification key for a requested therapy.
+
+        `classification` is keyed by therapy name (e.g. "secukinumab"), but callers
+        pass either that name or the full service string (e.g.
+        "biologic therapy - secukinumab"). Try an exact match, then the token after
+        the last " - ", then a case-insensitive scan of the classification keys.
+        """
         classification = guideline.get("classification", {})
-        service_class = classification.get(requested_service, {})
+        if not requested:
+            return requested
+        if requested in classification:
+            return requested
+        tail = requested.split(" - ")[-1].strip()
+        if tail in classification:
+            return tail
+        for key in classification:
+            if key.lower() == tail.lower() or key.lower() == requested.lower():
+                return key
+        return tail
+
+    def evaluate_coverage_tier(self, guideline: dict, requested_service: str) -> dict:
+        """Evaluate whether a requested service meets coverage tier requirements.
+
+        Resolves the therapy name from the requested service so classification —
+        which is keyed by therapy name, not the full service string — is found.
+        """
+        classification = guideline.get("classification", {})
+        key = self._therapy_key(guideline, requested_service)
+        service_class = classification.get(key, {})
 
         return {
             "service": requested_service,
+            "therapy": key,
             "tier": service_class.get("tier", "unknown"),
             "prior_auth_required": service_class.get("prior_auth_required", False),
             "class": service_class.get("class", "unknown"),

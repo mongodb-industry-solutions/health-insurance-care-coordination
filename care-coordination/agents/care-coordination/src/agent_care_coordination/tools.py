@@ -29,7 +29,7 @@ def register(app: App) -> None:
                     "hint": "Use an IANA timezone like America/Los_Angeles.",
                 }
             )
-        return datetime.now(timezone).date().isoformat()
+        return json.dumps({"date": datetime.now(timezone).date().isoformat()})
 
     @app.tool(is_local=False)
     def save_user_info(info_key: str, info_value: str) -> str:
@@ -99,7 +99,10 @@ def register(app: App) -> None:
 
         Args:
             condition_code: ICD-10 diagnosis code (e.g., M06.9 for rheumatoid arthritis).
-            member_id: The member whose case this read is part of (for the audit trail).
+            member_id: The member whose case this read is part of. Kept for call
+                consistency across the pathway tools; the guideline read is not
+                separately audited — the exact version consulted is recorded on the
+                decision trace's contextSnapshot.guidelineRef when the case is processed.
         """
         try:
             backend_url = _get_backend_url()
