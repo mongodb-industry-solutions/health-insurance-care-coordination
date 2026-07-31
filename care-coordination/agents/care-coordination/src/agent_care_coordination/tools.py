@@ -9,7 +9,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 from magenta_sdklanggraph import App
-from pymongo import MongoClient
 
 
 def _get_backend_url() -> str:
