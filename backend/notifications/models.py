@@ -7,7 +7,7 @@ from typing import Optional, List
 class Notification(BaseModel):
     notification_id: str = Field(alias="_id")
     member_id: str
-    authorization_id: Optional[str] = None
+    trace_id: Optional[str] = None
     status: str
     message: str
     created_at: str

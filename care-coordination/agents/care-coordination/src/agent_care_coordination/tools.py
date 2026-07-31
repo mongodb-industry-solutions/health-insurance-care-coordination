@@ -81,7 +81,6 @@ def register(app: App) -> None:
             backend_url = _get_backend_url()
             response = requests.get(
                 f"{backend_url}/api/members/{member_id}/clinical-context",
-                params={"agent": "pathway_agent"},  # server-side audits the read (step 3a)
                 timeout=5,
             )
             if response.status_code == 404:
@@ -107,7 +106,6 @@ def register(app: App) -> None:
             backend_url = _get_backend_url()
             response = requests.get(
                 f"{backend_url}/api/guidelines/condition/{condition_code}",
-                params={"agent": "pathway_agent", "member_id": member_id},  # audits the read (step 4a)
                 timeout=5,
             )
             if response.status_code == 404:
@@ -136,8 +134,7 @@ def register(app: App) -> None:
                 params={
                     "service_name": service,
                     "diagnosis": diagnosis,
-                    "agent": "pathway_agent",  # audits the read (step 6a)
-                    "member_id": member_id,
+                    "member_id": member_id,  # excluded from own results
                 },
                 timeout=5,
             )
@@ -161,7 +158,7 @@ def register(app: App) -> None:
         """
         try:
             backend_url = _get_backend_url()
-            params = {"agent": "verification_agent"}  # audits the detection (step 1a)
+            params = {}
             if drug:
                 params["drug"] = drug
             response = requests.get(
@@ -223,10 +220,11 @@ def register(app: App) -> None:
 
     @app.tool(is_local=False)
     def get_member_authorizations(member_id: str) -> str:
-        """Retrieve all authorizations (past and pending) for a member.
+        """Retrieve all prior-authorization decision traces (past and pending) for a member.
 
-        Returns authorization decisions, decision traces (reasoning), and review
-        status (whether routed to a medical director, whether closed, who closed it).
+        Returns each trace's status, memory-typed reasoning steps, outcome, and
+        review block (whether routed to a medical director, whether closed, who
+        closed it). Prior authorizations are decision-trace documents in the Audit Log.
 
         Args:
             member_id: The member's unique ID.
@@ -234,7 +232,7 @@ def register(app: App) -> None:
         try:
             backend_url = _get_backend_url()
             response = requests.get(
-                f"{backend_url}/api/authorizations/member/{member_id}",
+                f"{backend_url}/api/audit/member/{member_id}/traces",
                 timeout=5,
             )
             response.raise_for_status()
@@ -256,7 +254,7 @@ def register(app: App) -> None:
         try:
             backend_url = _get_backend_url()
             response = requests.post(
-                f"{backend_url}/api/authorizations/file",
+                f"{backend_url}/api/audit/traces/file",
                 params={"member_id": member_id, "requested_service": requested_service},
                 timeout=5,
             )
@@ -305,7 +303,7 @@ def register(app: App) -> None:
         try:
             backend_url = _get_backend_url()
             response = requests.post(
-                f"{backend_url}/api/authorizations/process",
+                f"{backend_url}/api/audit/traces/process",
                 params={"member_id": member_id},
                 timeout=10,
             )
@@ -315,39 +313,3 @@ def register(app: App) -> None:
             return json.dumps(response.json())
         except requests.RequestException as e:
             return json.dumps({"error": f"Failed to process authorization: {str(e)}"})
-
-    @app.tool(is_local=False)
-    def log_agent_action(
-        member_id: str,
-        action: str,
-        fields_accessed: list,
-        related_authorization: str = "",
-    ) -> str:
-        """Log an agent's action for the audit trail.
-
-        Every agent interaction with a member record is logged so regulators can
-        reconstruct what data was accessed, when, by which agent, and why.
-
-        Args:
-            member_id: The member's unique ID.
-            action: What the agent did (e.g., "read_clinical_context").
-            fields_accessed: List of member document fields accessed (e.g., ["clinical_history.treatment_responses"]).
-            related_authorization: Optional authorization ID this action relates to.
-        """
-        try:
-            backend_url = _get_backend_url()
-            response = requests.post(
-                f"{backend_url}/api/audit/log",
-                params={
-                    "member_id": member_id,
-                    "agent": "pathway_agent",
-                    "action": action,
-                    "fields_accessed": fields_accessed,
-                    "related_authorization": related_authorization if related_authorization else None,
-                },
-                timeout=5,
-            )
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to log agent action: {str(e)}"})

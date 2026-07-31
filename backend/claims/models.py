@@ -1,24 +1,72 @@
-"""Pydantic models for claims domain."""
+"""Pydantic models for claims domain.
+
+The Claim is the financial record connecting a health event to its insurance
+outcome — one of the two central objects (with Member). The treating provider is
+embedded directly. A claim carries a linked Audit Log trace (`linked_audit_trace_id`)
+only when the underlying service required prior authorization.
+
+Financial fields (billed/paid/owed) are modeled for realism per the official data
+model, but the demo performs NO adjudication math — they are seeded static values.
+
+`service`/`diagnosis`/`presentation_profile` are retained alongside the richer
+coded fields because comparable-case (episodic) retrieval keys off them.
+"""
 
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 
 
+class ClaimProvider(BaseModel):
+    provider_id: str = Field(alias="providerId")
+    name: Optional[str] = None
+    specialty: Optional[str] = None
+
+    class Config:
+        populate_by_name = True
+
+
 class Claim(BaseModel):
     claim_id: str = Field(alias="_id")
     member_id: str
+    policy_id: Optional[str] = Field(default=None, alias="policyId")
+    provider: Optional[ClaimProvider] = None
+
+    # Coded clinical detail
+    procedure_code: Optional[str] = Field(default=None, alias="procedureCode")
+    procedure_desc: Optional[str] = Field(default=None, alias="procedureDesc")
+    diagnosis_code: Optional[str] = Field(default=None, alias="diagnosisCode")
+    diagnosis_display: Optional[str] = Field(default=None, alias="diagnosisDisplay")
+
+    # Retained retrieval keys (episodic memory / comparable-case matching)
     service: str
     diagnosis: str
     outcome: str
     presentation_profile: Optional[Dict[str, Any]] = None
+
+    service_date: Optional[str] = Field(default=None, alias="serviceDate")
+    claim_type: Optional[str] = Field(default=None, alias="claimType")
+
+    # Financials — modeled, not computed (no adjudication math in the demo)
+    billed_amt: Optional[float] = Field(default=None, alias="billedAmt")
+    paid_amt: Optional[float] = Field(default=None, alias="paidAmt")
+    member_owed: Optional[float] = Field(default=None, alias="memberOwed")
+    currency: Optional[str] = None
+
+    status: Optional[str] = None
+    denial_reason: Optional[str] = Field(default=None, alias="denialReason")
+    # Reference to the Audit Log trace that authorized this claim, if prior auth applied.
+    linked_audit_trace_id: Optional[str] = Field(default=None, alias="linkedAuditTraceId")
+
     adjudicated_at: Optional[str] = None
+    created_at: Optional[str] = Field(default=None, alias="createdAt")
+    updated_at: Optional[str] = Field(default=None, alias="updatedAt")
 
     class Config:
         populate_by_name = True
 
 
 class ComparableClaim(BaseModel):
-    """Projected shape returned by comparable-case retrieval (step 6).
+    """Projected shape returned by comparable-case retrieval (episodic memory).
 
     Only the fields the agent needs to judge similarity — service, outcome, and
     the presentation_profile — plus ids to cite the precedent.

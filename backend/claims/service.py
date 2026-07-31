@@ -4,7 +4,6 @@ from collections import defaultdict
 from datetime import datetime
 
 from db.mdb import get_connector
-from audit.repository import AuditRepository
 from .repository import ClaimRepository
 
 
@@ -23,38 +22,23 @@ class ClaimService:
     def __init__(self, connector=None):
         connector = connector or get_connector()
         self.repository = ClaimRepository(connector)
-        # Cross-cutting audit of agent reads (see MemberService for the rationale).
-        self.audit = AuditRepository(connector)
 
     def find_comparable_cases(
-        self, service: str, diagnosis: str, agent: str = None, member_id: str = None
+        self, service: str, diagnosis: str, member_id: str = None
     ) -> list:
         """Find comparable precedent (episodic memory) — other members' approved
         claims for the same service + diagnosis. Phase 1, step 6.
 
-        The querying member is excluded (passed as `member_id`), which also scopes
-        the step-6a audit. Logging requires both `agent` and `member_id`.
+        The querying member is excluded (passed as `member_id`).
 
         NOTE (enhancement): matching is exact on service + diagnosis. Replace with
         Atlas Vector Search over `presentation_profile` embeddings to retrieve by
         semantic similarity rather than exact codes/strings — the infra is already
         scaffolded (vogayeai/, _vector_search_idx_creator.py).
         """
-        claims = self.repository.find_comparable(
+        return self.repository.find_comparable(
             service, diagnosis, exclude_member=member_id
         )
-        if agent and member_id:
-            self.audit.record(
-                member_id=member_id,
-                agent=agent,
-                action="read comparable cases",
-                fields_accessed=[
-                    "claims.service",
-                    "claims.outcome",
-                    "claims.presentation_profile",
-                ],
-            )
-        return claims
 
     def get_member_claims(self, member_id: str) -> list:
         """Retrieve all adjudicated claims for a member."""
@@ -66,7 +50,6 @@ class ClaimService:
         drug: str = None,
         cadence_days: int = 30,
         gap_factor: float = 1.5,
-        agent: str = None,
     ) -> dict:
         """Phase 2, step 1: find breaks in medication refill cadence.
 
@@ -75,8 +58,6 @@ class ClaimService:
         consecutive fills are compared; any interval longer than
         cadence_days * gap_factor is flagged as a gap. Generalized: catches any
         gap for any drug, not a hardcoded 10-day window.
-
-        Logs the step-1a audit (`detect refill gap`) when an `agent` is supplied.
         """
         claims = self.repository.find_by_member(member_id)
         pharmacy = [c for c in claims if str(c.get("service", "")).startswith("pharmacy - ")]
@@ -103,14 +84,6 @@ class ClaimService:
                         "gap_days": interval,
                         "approx_missed_fills": max(1, round(interval / cadence_days) - 1),
                     })
-
-        if agent:
-            self.audit.record(
-                member_id=member_id,
-                agent=agent,
-                action="detect refill gap",
-                fields_accessed=["claims.service", "claims.adjudicated_at"],
-            )
 
         return {
             "member_id": member_id,

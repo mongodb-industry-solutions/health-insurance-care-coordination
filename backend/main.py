@@ -8,7 +8,7 @@ from db.mdb import close_connector
 
 # Import routers from each domain
 from members.routes import router as members_router
-from authorizations.routes import router as authorizations_router
+from policies.routes import router as policies_router
 from claims.routes import router as claims_router
 from guidelines.routes import router as guidelines_router
 from audit.routes import router as audit_router
@@ -59,7 +59,7 @@ async def health_check():
 
 # Include domain routers
 app.include_router(members_router)
-app.include_router(authorizations_router)
+app.include_router(policies_router)
 app.include_router(claims_router)
 app.include_router(guidelines_router)
 app.include_router(audit_router)

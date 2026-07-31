@@ -23,18 +23,16 @@ def get_claim_service(connector: MongoDBConnector = Depends(get_connector)) -> C
 async def find_comparable_claims(
     service_name: str,
     diagnosis: str,
-    agent: str = None,
     member_id: str = None,
     service: ClaimService = Depends(get_claim_service),
 ):
     """Find comparable precedent — other members' approved claims for the same
     service and diagnosis (episodic memory).
 
-    Pass both `agent` and `member_id` to record the read in that member's audit
-    trail (step 6a); `member_id` also excludes the member from their own results.
+    Pass `member_id` to exclude the member from their own results.
     """
     claims = service.find_comparable_cases(
-        service_name, diagnosis, agent=agent, member_id=member_id
+        service_name, diagnosis, member_id=member_id
     )
     return {
         "query": {"service": service_name, "diagnosis": diagnosis},
@@ -60,14 +58,11 @@ async def get_member_claims(
 async def detect_refill_gaps(
     member_id: str,
     drug: str = None,
-    agent: str = None,
     service: ClaimService = Depends(get_claim_service),
 ):
     """Phase 2, step 1: detect breaks in medication refill cadence from the
-    pharmacy claims. Pass `agent` (e.g. `verification_agent`) to record the
-    detection in the audit trail (step 1a).
-    """
-    return service.detect_refill_gaps(member_id, drug=drug, agent=agent)
+    pharmacy claims."""
+    return service.detect_refill_gaps(member_id, drug=drug)
 
 
 @router.get("/{claim_id}", response_model=Claim)

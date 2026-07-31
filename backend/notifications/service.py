@@ -4,50 +4,48 @@ import uuid
 from datetime import datetime, timezone
 
 from db.mdb import get_connector
-from authorizations.repository import AuthorizationRepository
-from members.repository import MemberRepository
 from audit.repository import AuditRepository
+from members.repository import MemberRepository
 from .repository import NotificationRepository
 
 
 class NotificationService:
     """Composes and persists member-facing notifications about authorization
-    outcomes. Reads the decision (authorizations) and demographics (members),
-    writes a plain-language notification, and audits it."""
+    outcomes. Reads the decision (the prior-auth trace in the Audit Log) and the
+    member's name, then writes a plain-language notification."""
 
     def __init__(self, connector=None):
         connector = connector or get_connector()
         self.repository = NotificationRepository(connector)
-        self.auth_repo = AuthorizationRepository(connector)
+        self.audit_repo = AuditRepository(connector)
         self.member_repo = MemberRepository(connector)
-        self.audit = AuditRepository(connector)
 
     def notify_member(self, member_id: str) -> dict:
-        """Phase 3, step 3/3a/3b: notify the member about their latest decision.
+        """Phase 3, step 3 / 3a: notify the member about their latest decision.
 
-        Reads the member's most recent authorization (status + reasoning) and
-        demographics, composes a plain-language message, inserts a notification
-        (the change stream a frontend watches), and logs `member notified`.
+        Reads the member's most recent prior-auth trace (status + review) and name,
+        composes a plain-language message, and inserts a notification (the change
+        stream a frontend watches).
 
         A case routed to a human is NOT final, so the member is told it is under
         review — not approved/denied — until the physician closes it (Phase 3a).
-        Raises ValueError if the member has no authorization yet.
+        Raises ValueError if the member has no trace yet.
         """
-        auths = self.auth_repo.find_by_member(member_id)
-        if not auths:
+        traces = self.audit_repo.find_by_member(member_id)
+        if not traces:
             raise ValueError(f"No authorization to notify for member {member_id}")
-        auth = max(auths, key=lambda a: a.get("created_at", ""))
+        trace = max(traces, key=lambda t: t.get("createdAt", ""))
 
         member = self.member_repo.get_by_id(member_id) or {}
-        name = member.get("demographics", {}).get("name", "Member")
-        service = auth.get("requested_service", "the requested treatment")
-        status = auth.get("status", "pending")
-        review = auth.get("review") or {}
-        # A case is only "under review" while it is routed AND not yet closed by a
-        # human. Once the medical director closes it, routed_to_human stays true but
-        # closed_by is set — that is a final decision, not a pending review.
-        pending_human = bool(review.get("routed_to_human")) and not review.get("closed_by")
-        human_closed = bool(review.get("closed_by"))
+        name = member.get("firstName") or "Member"
+        service = trace.get("requested_service", "the requested treatment")
+        status = trace.get("status", "pending")
+        review = trace.get("review") or {}
+        # "Under review" only while routed AND not yet closed by a human. Once the
+        # medical director closes it, routedToHuman stays true but closedBy is set —
+        # that is a final decision, not a pending review.
+        pending_human = bool(review.get("routedToHuman")) and not review.get("closedBy")
+        human_closed = bool(review.get("closedBy"))
 
         if pending_human:
             message = (
@@ -78,25 +76,13 @@ class NotificationService:
         notification = {
             "_id": f"NOTIF-{uuid.uuid4().hex[:10]}",
             "member_id": member_id,
-            "authorization_id": auth["_id"],
+            "trace_id": trace["_id"],
             "status": status,
             "message": message,
             "created_at": now,
             "read": False,
         }
         self.repository.upsert(notification)
-
-        self.audit.record(
-            member_id=member_id,
-            agent="notification_service",
-            action="member notified",
-            fields_accessed=[
-                "demographics",
-                "authorizations.status",
-                "authorizations.decision_trace.reasoning",
-            ],
-            related_authorization=auth["_id"],
-        )
         return notification
 
     def get_member_notifications(self, member_id: str) -> list:

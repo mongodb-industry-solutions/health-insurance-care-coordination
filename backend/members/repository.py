@@ -7,6 +7,7 @@ class MemberRepository(Repository):
 
     Every member document holds eligibility, clinical history, treatment
     responses and a small cross-domain summary, so most agent reads land here.
+    A member references a Policy (`policyId`), which in turn references a Plan.
     """
 
     collection_name = Collections.MEMBERS
@@ -18,5 +19,5 @@ class MemberRepository(Repository):
         )
         return doc
 
-    def find_by_plan(self, plan_id):
-        return self.find({"plan_id": plan_id})
+    def find_by_policy(self, policy_id):
+        return self.find({"policyId": policy_id})

@@ -78,6 +78,16 @@ class PatientProfile:
     # Small notes that make the narrative legible in the data
     tags: list[str] = field(default_factory=list)
 
+    # --- Official-data-model additions (defaults keep existing literals valid) ---
+    # The member references a Policy (which references the plan). If unset, the
+    # generator derives one deterministically from the member id.
+    policy_number: str | None = None
+    state: str = "OH"
+    preferred_language: str = "en"          # ISO language code
+    provider_id: str | None = None          # embedded managing-provider id
+    provider_specialty: str = "Rheumatology"
+    annual_premium: float = 4200.0          # modeled, not used in any math
+
 
 # --- Maria: the canonical clean-approval story from the narrative ------------
 
@@ -203,6 +213,7 @@ DAVID = PatientProfile(
     plan_tier="specialty",
     guideline_id="CMG-RA-2026.3",
     case_type="denial",
+    state="IL",
     tags=["rheumatoid-arthritis", "step-therapy-insufficient"],
 )
 

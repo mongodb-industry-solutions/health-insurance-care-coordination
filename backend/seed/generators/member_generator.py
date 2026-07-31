@@ -1,16 +1,18 @@
 """Expand a PatientProfile into the documents that make a record realistic.
 
-One profile produces:
+One profile produces (at the Phase 0 pre-decision baseline):
+  - one `policies` document (the member's contract, referencing the plan)
   - one `members` document (core object: eligibility, clinical history,
     treatment responses, cross-domain summary)
   - a timeline of `claims` (enrollment, diagnosis visit, monthly first-line
-    refills, follow-ups, lab work) — each adjudicated, so the member has a
-    real history and comparable-case precedent exists
-  - one `authorization` document whose decision_trace and review block reflect
-    the profile's case_type (clean approval / human review / denial)
+    refills, follow-ups, lab work) — each adjudicated, so the member has real
+    history and comparable-case precedent exists
 
-Everything is derived from the profile so the data stays internally consistent
-(dates line up, the trial gap shows as a missing refill, etc.).
+No prior-authorization trace is seeded: the secukinumab request has not been filed
+at Phase 0, and its decision (trace, steps, outcome, review) is the runtime output
+the demo generates in Phase 3. Everything is derived from the profile so the data
+stays internally consistent (dates line up, the trial gap shows as a missing
+refill, etc.).
 """
 
 from datetime import datetime, timedelta, timezone
@@ -41,6 +43,33 @@ def _iso_ts(dt: datetime) -> str:
 
 def _parse(date_str: str) -> datetime:
     return datetime.strptime(date_str, "%Y-%m-%d")
+
+
+def _suffix(profile: PatientProfile) -> str:
+    """The numeric tail of the member id, e.g. MBR-2026-44109 -> 2026-44109."""
+    parts = profile.member_id.split("-", 1)
+    return parts[1] if len(parts) > 1 else profile.member_id
+
+
+def _policy_number(profile: PatientProfile) -> str:
+    return profile.policy_number or f"POL-{_suffix(profile)}"
+
+
+def _names(profile: PatientProfile) -> tuple[str, str]:
+    bits = profile.name.split(" ", 1)
+    first = bits[0]
+    last = bits[1] if len(bits) > 1 else ""
+    return first, last
+
+
+def _provider(profile: PatientProfile) -> dict:
+    """Embedded managing-provider object (matches the datamodel's shape)."""
+    provider_id = profile.provider_id or f"PROV-{profile.state}-{_suffix(profile)[-5:]}"
+    return {
+        "providerId": provider_id,
+        "name": profile.managing_provider,
+        "specialty": profile.provider_specialty,
+    }
 
 
 def _trial_dates(profile: PatientProfile):
@@ -116,6 +145,43 @@ def _claim_id(profile: PatientProfile, seq: int) -> str:
     return f"CLM-{year}-{numeric}{seq:02d}"
 
 
+def _mk_claim(profile: PatientProfile, seq: int, *, service: str, adjudicated: datetime,
+              presentation_profile: dict, procedure_code: str, procedure_desc: str,
+              claim_type: str, billed: float) -> dict:
+    """Assemble one adjudicated claim with the official-model fields.
+
+    Financials are static, realistic values — the demo runs no adjudication math.
+    Routine claims carry no linked audit trace (prior auth did not apply).
+    """
+    copay = 25.0 if claim_type != "specialty_pharmacy" else 0.0
+    member_owed = min(copay, billed)
+    return {
+        "_id": _claim_id(profile, seq),
+        "member_id": profile.member_id,
+        "policyId": _policy_number(profile),
+        "provider": _provider(profile),
+        "procedureCode": procedure_code,
+        "procedureDesc": procedure_desc,
+        "diagnosisCode": profile.diagnosis_code,
+        "diagnosisDisplay": profile.diagnosis_display,
+        # Retained retrieval keys (episodic memory / comparable-case matching)
+        "service": service,
+        "diagnosis": profile.diagnosis_code,
+        "outcome": "approved",
+        "presentation_profile": presentation_profile,
+        "serviceDate": _iso(adjudicated),
+        "claimType": claim_type,
+        "billedAmt": billed,
+        "paidAmt": round(billed - member_owed, 2),
+        "memberOwed": member_owed,
+        "currency": "USD",
+        "status": "paid",
+        "denialReason": None,
+        "linkedAuditTraceId": None,
+        "adjudicated_at": _iso_ts(adjudicated),
+    }
+
+
 def build_claims(profile: PatientProfile) -> list[dict]:
     """Build the adjudicated claims timeline across the first-line trial."""
     claims: list[dict] = []
@@ -123,40 +189,34 @@ def build_claims(profile: PatientProfile) -> list[dict]:
     seq = 1
 
     # Enrollment / initial office visit
-    claims.append({
-        "_id": _claim_id(profile, seq),
-        "member_id": profile.member_id,
-        "service": "office visit - new patient",
-        "diagnosis": profile.diagnosis_code,
-        "outcome": "approved",
-        "presentation_profile": {"visit_type": "enrollment"},
-        "adjudicated_at": _iso_ts(start + timedelta(days=5)),
-    })
+    claims.append(_mk_claim(
+        profile, seq, service="office visit - new patient",
+        adjudicated=start + timedelta(days=5),
+        presentation_profile={"visit_type": "enrollment"},
+        procedure_code="99204", procedure_desc="Office visit, new patient",
+        claim_type="medical", billed=280.0,
+    ))
     seq += 1
 
     # Diagnosis visit
     dx_date = start + timedelta(days=14)
-    claims.append({
-        "_id": _claim_id(profile, seq),
-        "member_id": profile.member_id,
-        "service": f"diagnostic evaluation - {profile.diagnosis_display}",
-        "diagnosis": profile.diagnosis_code,
-        "outcome": "approved",
-        "presentation_profile": {"visit_type": "diagnosis"},
-        "adjudicated_at": _iso_ts(dx_date),
-    })
+    claims.append(_mk_claim(
+        profile, seq, service=f"diagnostic evaluation - {profile.diagnosis_display}",
+        adjudicated=dx_date,
+        presentation_profile={"visit_type": "diagnosis"},
+        procedure_code="99214", procedure_desc="Diagnostic evaluation",
+        claim_type="medical", billed=320.0,
+    ))
     seq += 1
 
     # Baseline lab work
-    claims.append({
-        "_id": _claim_id(profile, seq),
-        "member_id": profile.member_id,
-        "service": "laboratory panel - baseline",
-        "diagnosis": profile.diagnosis_code,
-        "outcome": "approved",
-        "presentation_profile": {"lab": "baseline"},
-        "adjudicated_at": _iso_ts(dx_date + timedelta(days=1)),
-    })
+    claims.append(_mk_claim(
+        profile, seq, service="laboratory panel - baseline",
+        adjudicated=dx_date + timedelta(days=1),
+        presentation_profile={"lab": "baseline"},
+        procedure_code="80053", procedure_desc="Comprehensive metabolic panel",
+        claim_type="medical", billed=150.0,
+    ))
     seq += 1
 
     # First-line drug: prescription starts ~2 weeks after diagnosis
@@ -172,52 +232,106 @@ def build_claims(profile: PatientProfile) -> list[dict]:
         refill_date = trial_start + timedelta(days=30 * month)
         if gap_start and gap_end and gap_start <= refill_date <= gap_end:
             continue  # missing refill during the clinically-explained hold
-        claims.append({
-            "_id": _claim_id(profile, seq),
-            "member_id": profile.member_id,
-            "service": f"pharmacy - {profile.first_line_drug}",
-            "diagnosis": profile.diagnosis_code,
-            "outcome": "approved",
-            "presentation_profile": {
+        claims.append(_mk_claim(
+            profile, seq, service=f"pharmacy - {profile.first_line_drug}",
+            adjudicated=refill_date + timedelta(days=1),
+            presentation_profile={
                 "rxnorm": profile.first_line_rxnorm,
                 "fill_number": month + 1,
             },
-            "adjudicated_at": _iso_ts(refill_date + timedelta(days=1)),
-        })
+            procedure_code=profile.first_line_rxnorm,
+            procedure_desc=f"{profile.first_line_drug} fill",
+            claim_type="pharmacy", billed=60.0,
+        ))
         seq += 1
 
-    # Periodic follow-up visits (every ~2 months) + a mid-trial lab
+    # Periodic follow-up visits (every ~2 months)
     for month in range(2, profile.trial_months, 2):
         fu_date = trial_start + timedelta(days=30 * month + 3)
-        claims.append({
-            "_id": _claim_id(profile, seq),
-            "member_id": profile.member_id,
-            "service": "office visit - follow-up",
-            "diagnosis": profile.diagnosis_code,
-            "outcome": "approved",
-            "presentation_profile": {"visit_type": "follow_up"},
-            "adjudicated_at": _iso_ts(fu_date),
-        })
+        claims.append(_mk_claim(
+            profile, seq, service="office visit - follow-up",
+            adjudicated=fu_date,
+            presentation_profile={"visit_type": "follow_up"},
+            procedure_code="99213", procedure_desc="Office visit, follow-up",
+            claim_type="medical", billed=180.0,
+        ))
         seq += 1
 
     return claims
 
 
+def build_policy(profile: PatientProfile) -> dict:
+    """Build the member's Policy document (contract referencing the plan)."""
+    now = datetime.now(timezone.utc)
+    first, last = _names(profile)
+    start = _parse(profile.enrollment_date)
+    expiry = start.replace(year=start.year + 1)
+    renewal = expiry - timedelta(days=30)
+    lapsed = profile.eligibility_status == "termed"
+
+    policy_number = _policy_number(profile)
+    effective_period = {
+        "effectiveDate": profile.enrollment_date,
+        "expiryDate": _iso(expiry),
+        "renewalDate": _iso(renewal),
+    }
+    if profile.coverage_end_date:
+        effective_period["expiryDate"] = profile.coverage_end_date
+
+    return {
+        "_id": policy_number,
+        "policyNumber": policy_number,
+        "policyType": "INDIVIDUAL_HEALTH",
+        "planId": profile.plan_id,
+        "status": "LAPSED" if lapsed else "ACTIVE",
+        "version": 1,
+        "isLatestVersion": True,
+        "effectivePeriod": effective_period,
+        "originalEffectiveDate": profile.enrollment_date,
+        "parties": [{
+            "customerId": profile.member_id,
+            "role": "POLICYHOLDER",
+            "isPrimary": True,
+            "firstName": first,
+            "lastName": last,
+            "dateOfBirth": profile.birth_date,
+        }],
+        "premium": {
+            "annualPremium": profile.annual_premium,
+            "currency": "USD",
+            "paymentFrequency": "MONTHLY",
+        },
+        "jurisdiction": {"state": profile.state, "country": "US"},
+        "claims": [c["_id"] for c in build_claims(profile)],
+        "createdAt": _iso_ts(start),
+        "updatedAt": _iso_ts(now),
+    }
+
+
+def _encrypted_blob(marker: str, value: str) -> str:
+    """Placeholder for a client-side-field-level-encrypted blob.
+
+    Real deployment would store a BSON Binary ciphertext (CSFLE). For the demo we
+    store an opaque, clearly-fake token so the field is present and never carries
+    plaintext PHI/PII.
+    """
+    return f"enc::{marker}::{'*' * max(len(value), 8)}"
+
+
 def build_member(profile: PatientProfile) -> dict:
     """Build the core member document at its Phase 0 baseline.
 
-    Phase 0 is *before* Dr. Patel documents the inadequate methotrexate response.
-    So the member is still actively on the first-line drug, there is no documented
-    treatment_response and no considered biologic yet. Those are Phase 1 outputs
-    (the "document inadequate response" action), not seeded facts. The ~7-month
-    trial itself is real Phase 0 history — it lives in the `claims` refill timeline.
+    Phase 0 is *before* Dr. Patel documents the inadequate first-line response, so
+    the member is still actively on the first-line drug, with no documented
+    treatment_response conclusion and no considered biologic yet (Phase 1 outputs).
+    The ~7-month trial itself is real Phase 0 history — it lives in the `claims`
+    refill timeline.
     """
     now = datetime.now(timezone.utc)
+    first, last = _names(profile)
 
-    # Eligibility is derived from the plan, not asserted: the member's effective
-    # tier is the highest tier the plan covers, and term_date is only present when
-    # coverage has lapsed. This makes coverage/eligibility checkable rather than
-    # always-passing.
+    # Eligibility derived from the plan: the member's effective tier is the highest
+    # tier the plan covers; term_date is present only when coverage lapsed.
     plan = _plan_for(profile)
     eligibility = {
         "status": profile.eligibility_status,
@@ -229,15 +343,18 @@ def build_member(profile: PatientProfile) -> dict:
 
     return {
         "_id": profile.member_id,
-        "plan_id": profile.plan_id,
+        "policyId": _policy_number(profile),
+        "firstName": first,
+        "lastName": last,
+        "dateOfBirth": profile.birth_date,
+        "gender": profile.gender,
+        "state": profile.state,
+        "preferredLanguage": profile.preferred_language,
+        # Encrypted-at-rest identifiers / PHI (opaque placeholders in the demo)
+        "sin_encrypted": _encrypted_blob("SIN", profile.member_id),
+        "phi_encrypted": _encrypted_blob("PHI", profile.diagnosis_code),
         # Eligibility & plan: small, stable, read on nearly every decision
         "eligibility": eligibility,
-        "demographics": {
-            "name": profile.name,
-            "birth_date": profile.birth_date,
-            "gender": profile.gender,
-            "occupation": profile.occupation,
-        },
         # Clinical context (SEMANTIC memory: coded concepts across vocabularies)
         "clinical_history": {
             "diagnoses": [
@@ -247,13 +364,10 @@ def build_member(profile: PatientProfile) -> dict:
                     "display": profile.diagnosis_display,
                     "status": "active",
                 },
-                # Any standing comorbidities (e.g. hypertension) — read by other
-                # consumers such as the care-gaps platform; inert for prior auth.
                 *profile.comorbidities,
             ],
-            # First-line therapy is still ACTIVE at Phase 0 — she is currently on
-            # methotrexate. It is not marked discontinued/inadequate until Dr. Patel
-            # documents the response in Phase 1.
+            # First-line therapy is still ACTIVE at Phase 0. Not marked
+            # discontinued/inadequate until Dr. Patel documents the response (Phase 1).
             "medications": [
                 {
                     "code": profile.first_line_rxnorm,
@@ -263,21 +377,19 @@ def build_member(profile: PatientProfile) -> dict:
                 }
             ],
             # EPISODIC memory: the member's own documented treatment responses.
-            # At Phase 0 there is one interim 'ongoing' assessment (trial being
-            # monitored). Phase 1 adds the conclusive 'inadequate' assessment.
             "treatment_responses": [build_interim_response(profile)],
             # Narrative visit notes — clinical content lives here on the member.
             "clinical_notes": build_clinical_notes(profile),
         },
-        # No considered biologic yet — that is set when the inadequate response is
-        # documented (Phase 1). Only the managing provider is known at baseline.
+        # No considered biologic yet — set when the inadequate response is
+        # documented (Phase 1). Managing provider is embedded as an object.
         "current_care_plan": {
             "considering_therapy": None,
-            "managing_provider": profile.managing_provider,
+            "approved_therapy": None,
+            "managing_provider": _provider(profile),
         },
-        # Small computed cross-domain summary: "where is this member now?"
-        # Baseline is a PRE-decision state: the member is still on first-line
-        # therapy, with no documented response, no considered biologic, and no
+        # Small computed cross-domain summary. Baseline is PRE-decision: still on
+        # first-line therapy, no documented response, no considered biologic, no
         # authorization filed. Phase 1-3 produce all of that.
         "summary": {
             "active_condition_count": 1,
@@ -285,98 +397,22 @@ def build_member(profile: PatientProfile) -> dict:
             "last_authorization_status": "none",
             "updated_at": _iso_ts(now),
         },
-        "updated_at": _iso_ts(now),
+        "createdAt": _iso_ts(_parse(profile.enrollment_date)),
+        "updatedAt": _iso_ts(now),
     }
-
-
-def _audit_id(profile: PatientProfile, suffix: str) -> str:
-    numeric = "".join(ch for ch in profile.member_id if ch.isdigit())[-5:]
-    return f"AUD-{numeric}-{suffix}"
-
-
-def build_enrollment_audit(profile: PatientProfile) -> dict:
-    """The Phase 0 enrollment audit entry (workflow step 1a).
-
-    Deterministic `_id` and enrollment-dated timestamp so it is idempotent on
-    re-seed and restored on reset, and so it always sorts first in the trail.
-    """
-    return {
-        "_id": _audit_id(profile, "enroll"),
-        "member_id": profile.member_id,
-        "agent": "enrollment_system",
-        "action": "member created",
-        "fields_accessed": [
-            "plan_id",
-            "eligibility",
-            "demographics",
-            "clinical_history",
-            "current_care_plan",
-        ],
-        "related_authorization": None,
-        "related_note": None,
-        "timestamp": _iso_ts(_parse(profile.enrollment_date)),
-    }
-
-
-def build_note_audits(profile: PatientProfile) -> list[dict]:
-    """Workflow step 2a: one 'clinical note recorded' entry per clinical note.
-
-    The audit records *that* a note was written and points at it via
-    `related_note` — the note's content stays on the member record.
-    """
-    audits = []
-    for i, note in enumerate(build_clinical_notes(profile), start=1):
-        audits.append({
-            "_id": _audit_id(profile, f"note-{i}"),
-            "member_id": profile.member_id,
-            "agent": "ehr_integration",
-            "action": "clinical note recorded",
-            "fields_accessed": ["clinical_history.clinical_notes"],
-            "related_authorization": None,
-            "related_note": note["note_id"],
-            "timestamp": _iso_ts(_parse(note["date"])),
-        })
-    return audits
-
-
-def build_medication_audits(profile: PatientProfile) -> list[dict]:
-    """Workflow step 3a: the 'medication updated' entry for the initial prescription.
-
-    Dated to when the first-line trial's first fill begins. Refills are captured
-    in the claims timeline and don't change the medications array, so only the
-    initial prescription produces a medication-update event. `related_medication`
-    points at the drug (RxNorm code) the event touched.
-    """
-    _, _, trial_start = _trial_dates(profile)
-    return [{
-        "_id": _audit_id(profile, "med-1"),
-        "member_id": profile.member_id,
-        "agent": "ehr_integration",
-        "action": "medication updated",
-        "fields_accessed": ["clinical_history.medications"],
-        "related_authorization": None,
-        "related_note": None,
-        "related_medication": profile.first_line_rxnorm,
-        "timestamp": _iso_ts(trial_start),
-    }]
 
 
 def build_bundle(profile: PatientProfile) -> dict:
     """Build the baseline documents for a profile.
 
-    Baseline = member + adjudicated claims history + the accrued audit trail
-    (enrollment + one entry per clinical note + the initial-prescription entry).
-    No authorization: the secukinumab request has not been filed at Phase 0, and
-    its decision (trace, confidence, close/route) is the runtime output the demo
-    generates in Phase 3. The profile's `case_type` still declares which scenario
-    this member represents, but the seed no longer pre-computes the answer.
+    Baseline = policy + member + adjudicated claims history. No prior-auth trace:
+    the request has not been filed at Phase 0, and its decision is the runtime
+    output the demo generates in Phase 3. The `audit_log` (decision-trace store)
+    therefore starts empty for a member; the profile's `case_type` still declares
+    which scenario this member represents.
     """
     return {
+        "policy": build_policy(profile),
         "member": build_member(profile),
         "claims": build_claims(profile),
-        "audit": (
-            [build_enrollment_audit(profile)]
-            + build_note_audits(profile)
-            + build_medication_audits(profile)
-        ),
     }
