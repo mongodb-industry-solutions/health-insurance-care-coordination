@@ -1,4 +1,6 @@
 import os
+from functools import lru_cache
+
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
@@ -69,3 +71,27 @@ class MongoDBConnector:
         collection = self.get_collection(collection_name)
         result = collection.delete_many(query)
         return result.deleted_count
+
+    def close(self):
+        """Close the underlying MongoClient and its connection pool."""
+        self.client.close()
+
+
+@lru_cache(maxsize=1)
+def get_connector() -> MongoDBConnector:
+    """Return the process-wide MongoDBConnector.
+
+    A `MongoClient` owns a connection pool and is designed to be created once
+    per process and shared. Caching the connector here means every repository
+    reuses a single client/pool instead of opening its own. This function is
+    also the FastAPI dependency the routes inject, so tests can swap the whole
+    data layer with `app.dependency_overrides[get_connector] = ...`.
+    """
+    return MongoDBConnector()
+
+
+def close_connector() -> None:
+    """Dispose the cached connector. Call on application shutdown."""
+    if get_connector.cache_info().currsize:
+        get_connector().close()
+        get_connector.cache_clear()
