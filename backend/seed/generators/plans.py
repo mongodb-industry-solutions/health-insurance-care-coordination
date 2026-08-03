@@ -47,6 +47,7 @@ def _treatment(*, code, name, drug, rxnorm, condition, covered, coinsurance,
 PLANS = [
     {
         "_id": "PLAN-PPO-7731",
+        "planId": "PLAN-PPO-7731",
         "planName": "PPO Specialty Care 7731",
         "planType": "PPO",
         "network": "in_network_preferred",
@@ -83,10 +84,22 @@ PLANS = [
                 maintenance="Maintenance dosing (biweekly, ongoing)",
             ),
         ],
+        # Plan-level versioning. The plan version in force must predate the
+        # earliest policy enrolled in it (earliest enrollment across the
+        # personas is 2025-03-01) and must still be in force today, so no
+        # policy ever references a lapsed plan. Static, not generated:
+        # plans are reference data and should not move on every reseed.
+        "effectiveDate": "2025-01-01",
+        "renewalDate": "2027-01-01",
         "schemaVersion": "1.1",
+        # Filed ahead of the effective date; last touched when treatments[]
+        # landed and schemaVersion went to 1.1.
+        "createdAt": "2024-10-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z",
     },
     {
         "_id": "PLAN-HMO-4420",
+        "planId": "PLAN-HMO-4420",
         "planName": "HMO Specialty Care 4420",
         "planType": "HMO",
         "network": "in_network_required",
@@ -116,13 +129,25 @@ PLANS = [
                 maintenance="Maintenance dosing (every 8 weeks, ongoing)",
             ),
         ],
+        # Plan-level versioning. The plan version in force must predate the
+        # earliest policy enrolled in it (earliest enrollment across the
+        # personas is 2025-03-01) and must still be in force today, so no
+        # policy ever references a lapsed plan. Static, not generated:
+        # plans are reference data and should not move on every reseed.
+        "effectiveDate": "2025-01-01",
+        "renewalDate": "2027-01-01",
         "schemaVersion": "1.1",
+        # Filed ahead of the effective date; last touched when treatments[]
+        # landed and schemaVersion went to 1.1.
+        "createdAt": "2024-10-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z",
     },
     # Standard-only plan: specialty tier NOT covered, and the specialty biologic is
     # explicitly listed as covered:false so the benefit denial is data-driven (not
     # merely inferred from the tier flag).
     {
         "_id": "PLAN-HMO-STD-3300",
+        "planId": "PLAN-HMO-STD-3300",
         "planName": "HMO Standard 3300",
         "planType": "HMO",
         "network": "in_network_required",
@@ -152,6 +177,17 @@ PLANS = [
                 maintenance="Maintenance dosing (monthly, ongoing)",
             ),
         ],
+        # Plan-level versioning. The plan version in force must predate the
+        # earliest policy enrolled in it (earliest enrollment across the
+        # personas is 2025-03-01) and must still be in force today, so no
+        # policy ever references a lapsed plan. Static, not generated:
+        # plans are reference data and should not move on every reseed.
+        "effectiveDate": "2025-01-01",
+        "renewalDate": "2027-01-01",
         "schemaVersion": "1.1",
+        # Filed ahead of the effective date; last touched when treatments[]
+        # landed and schemaVersion went to 1.1.
+        "createdAt": "2024-10-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z",
     },
 ]

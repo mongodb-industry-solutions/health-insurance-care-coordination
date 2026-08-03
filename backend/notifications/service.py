@@ -75,11 +75,11 @@ class NotificationService:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         notification = {
             "_id": f"NOTIF-{uuid.uuid4().hex[:10]}",
-            "member_id": member_id,
-            "trace_id": trace["_id"],
+            "memberId": member_id,
+            "traceId": trace["_id"],
             "status": status,
             "message": message,
-            "created_at": now,
+            "createdAt": now,
             "read": False,
         }
         self.repository.upsert(notification)

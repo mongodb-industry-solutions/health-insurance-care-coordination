@@ -267,12 +267,28 @@ class AuditService:
 
     def _build_steps(self, therapy, diagnosis_code, therapy_tier, tier_covered,
                      step_drug, best_months, min_months, step_met, comparable) -> list:
-        """The memory-typed reasoning trail — the demo's core claim as data."""
+        """The memory-typed reasoning trail — the demo's core claim as data.
+
+        Every step carries a structured `input`/`output` alongside the prose
+        `detail`, so the evidence a step consumed and the conclusion it produced
+        are machine-readable (datamodel §5) rather than only narratable. Both are
+        derived from the computed facts passed in — nothing is condition- or
+        drug-specific, so this holds for any persona, including the cases with no
+        step-therapy requirement and no comparable precedent.
+        """
+        comparable_ids = [c["_id"] for c in comparable]
         steps = [
             {
                 "stepId": "STP-001",
                 "memoryType": "semantic",
                 "name": "match therapy to condition",
+                "input": {
+                    "requested_therapy": therapy,
+                    "diagnosis_code": diagnosis_code,
+                },
+                "output": {
+                    "matched": bool(therapy and diagnosis_code),
+                },
                 "detail": f"Matched requested therapy {therapy} to condition {diagnosis_code}.",
                 "confidence": 0.98,
             },
@@ -280,6 +296,14 @@ class AuditService:
                 "stepId": "STP-002",
                 "memoryType": "taxonomic",
                 "name": "classify therapy",
+                "input": {
+                    "therapy": therapy,
+                    "classified_tier": therapy_tier,
+                },
+                "output": {
+                    "tier": therapy_tier,
+                    "tier_covered": tier_covered,
+                },
                 "detail": (
                     f"Classified {therapy} as {therapy_tier or 'n/a'} tier; "
                     f"plan coverage of that tier: {'yes' if tier_covered else 'no'}."
@@ -290,6 +314,16 @@ class AuditService:
                 "stepId": "STP-003",
                 "memoryType": "episodic",
                 "name": "member trial + comparable cases",
+                "input": {
+                    "trial_drug": step_drug,
+                    "documented_months": best_months,
+                    "diagnosis_code": diagnosis_code,
+                },
+                "output": {
+                    "comparable_case_ids": comparable_ids,
+                    "comparable_count": len(comparable_ids),
+                    "precedent_found": bool(comparable_ids),
+                },
                 "detail": (
                     f"Member trial: {step_drug} {best_months} months documented. "
                     + (
@@ -304,6 +338,14 @@ class AuditService:
                 "stepId": "STP-004",
                 "memoryType": "procedural",
                 "name": "apply step-therapy gate",
+                "input": {
+                    "required_drug": step_drug,
+                    "required_months": min_months,
+                    "documented_months": best_months,
+                },
+                "output": {
+                    "step_therapy_satisfied": step_met,
+                },
                 "detail": (
                     f"Step therapy requires {min_months} months; {best_months} documented — "
                     f"{'satisfied' if step_met else 'not satisfied'}."

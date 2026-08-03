@@ -125,8 +125,12 @@ def register(app: App) -> None:
         treatments for similar presentations. Used to inform authorization confidence.
 
         Args:
-            service: Service description (e.g., "biologic therapy - secukinumab").
-            diagnosis: ICD-10 diagnosis code.
+            service: The therapy being sought. Prefer the canonical form
+                "biologic therapy - <drug>" (e.g. "biologic therapy - secukinumab"),
+                but the drug name alone (e.g. "secukinumab") also matches.
+                Always name the specific drug — never a generic phrase like
+                "biologic therapy" on its own.
+            diagnosis: ICD-10 diagnosis code (e.g. "M06.9"), not the display name.
             member_id: The member whose case this is for (excluded from results; audits the read).
         """
         try:

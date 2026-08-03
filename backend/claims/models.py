@@ -27,7 +27,7 @@ class ClaimProvider(BaseModel):
 
 class Claim(BaseModel):
     claim_id: str = Field(alias="_id")
-    member_id: str
+    member_id: str = Field(alias="memberId")
     policy_id: Optional[str] = Field(default=None, alias="policyId")
     provider: Optional[ClaimProvider] = None
 
@@ -72,7 +72,7 @@ class ComparableClaim(BaseModel):
     the presentation_profile — plus ids to cite the precedent.
     """
     claim_id: str = Field(alias="_id")
-    member_id: Optional[str] = None
+    member_id: Optional[str] = Field(default=None, alias="memberId")
     service: str
     outcome: str
     presentation_profile: Optional[Dict[str, Any]] = None

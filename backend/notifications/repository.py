@@ -13,9 +13,9 @@ class NotificationRepository(Repository):
 
     def find_by_member(self, member_id):
         return list(
-            self.collection.find({"member_id": member_id}).sort("created_at", 1)
+            self.collection.find({"memberId": member_id}).sort("createdAt", 1)
         )
 
     def delete_by_member(self, member_id):
         """Remove a member's notifications (used by demo reset)."""
-        return self.delete_by({"member_id": member_id})
+        return self.delete_by({"memberId": member_id})
