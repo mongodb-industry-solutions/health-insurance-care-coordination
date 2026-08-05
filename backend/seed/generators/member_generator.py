@@ -152,21 +152,37 @@ def _mk_claim(profile: PatientProfile, seq: int, *, service: str, adjudicated: d
 
     Financials are static, realistic values — the demo runs no adjudication math.
     Routine claims carry no linked audit trace (prior auth did not apply).
+
+    Claims dated BEFORE the diagnosis visit cannot carry the condition's code —
+    it had not been made yet. They bill under a general-encounter code instead,
+    the way a real pre-diagnosis visit would, so the claims timeline stays
+    truthful about what was known when.
     """
     copay = 25.0 if claim_type != "specialty_pharmacy" else 0.0
     member_owed = min(copay, billed)
+
+    _, dx_date, _ = _trial_dates(profile)
+    if adjudicated < dx_date:
+        diagnosis_code = "Z00.00"
+        diagnosis_display = "Encounter for general adult medical examination"
+    else:
+        diagnosis_code = profile.diagnosis_code
+        diagnosis_display = profile.diagnosis_display
+
     return {
         "_id": _claim_id(profile, seq),
-        "member_id": profile.member_id,
+        # Mirrors `_id` — see the note on the member's `memberId`.
+        "claimId": _claim_id(profile, seq),
+        "memberId": profile.member_id,
         "policyId": _policy_number(profile),
         "provider": _provider(profile),
         "procedureCode": procedure_code,
         "procedureDesc": procedure_desc,
-        "diagnosisCode": profile.diagnosis_code,
-        "diagnosisDisplay": profile.diagnosis_display,
+        "diagnosisCode": diagnosis_code,
+        "diagnosisDisplay": diagnosis_display,
         # Retained retrieval keys (episodic memory / comparable-case matching)
         "service": service,
-        "diagnosis": profile.diagnosis_code,
+        "diagnosis": diagnosis_code,
         "outcome": "approved",
         "presentation_profile": presentation_profile,
         "serviceDate": _iso(adjudicated),
@@ -179,6 +195,10 @@ def _mk_claim(profile: PatientProfile, seq: int, *, service: str, adjudicated: d
         "denialReason": None,
         "linkedAuditTraceId": None,
         "adjudicated_at": _iso_ts(adjudicated),
+        # Lifecycle timestamps (datamodel §4). A claim is immutable once
+        # adjudicated, so both anchor to the adjudication moment.
+        "createdAt": _iso_ts(adjudicated),
+        "updatedAt": _iso_ts(adjudicated),
     }
 
 
@@ -341,8 +361,23 @@ def build_member(profile: PatientProfile) -> dict:
     if profile.coverage_end_date:
         eligibility["term_date"] = profile.coverage_end_date
 
+    diagnoses = [
+        {
+            "code": profile.diagnosis_code,
+            "system": profile.diagnosis_system,
+            "display": profile.diagnosis_display,
+            "status": "active",
+        },
+        *profile.comorbidities,
+    ]
+
     return {
         "_id": profile.member_id,
+        # Mirrors `_id`. The business key IS the primary key here (idiomatic
+        # Mongo, and what the data model's own examples show), but the model's
+        # field table names `memberId`, so it is carried redundantly for anyone
+        # reading against that name. Always equal to `_id`.
+        "memberId": profile.member_id,
         "policyId": _policy_number(profile),
         "firstName": first,
         "lastName": last,
@@ -357,15 +392,7 @@ def build_member(profile: PatientProfile) -> dict:
         "eligibility": eligibility,
         # Clinical context (SEMANTIC memory: coded concepts across vocabularies)
         "clinical_history": {
-            "diagnoses": [
-                {
-                    "code": profile.diagnosis_code,
-                    "system": profile.diagnosis_system,
-                    "display": profile.diagnosis_display,
-                    "status": "active",
-                },
-                *profile.comorbidities,
-            ],
+            "diagnoses": diagnoses,
             # First-line therapy is still ACTIVE at Phase 0. Not marked
             # discontinued/inadequate until Dr. Patel documents the response (Phase 1).
             "medications": [
@@ -392,7 +419,9 @@ def build_member(profile: PatientProfile) -> dict:
         # first-line therapy, no documented response, no considered biologic, no
         # authorization filed. Phase 1-3 produce all of that.
         "summary": {
-            "active_condition_count": 1,
+            "active_condition_count": sum(
+                1 for d in diagnoses if d.get("status") == "active"
+            ),
             "open_authorization_count": 0,
             "last_authorization_status": "none",
             "updated_at": _iso_ts(now),
