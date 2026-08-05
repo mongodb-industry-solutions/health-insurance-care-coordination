@@ -49,7 +49,7 @@ class AuditService:
         when it is processed. This is the EHR/provider filing the request, not an
         agent decision. Raises ValueError if the member does not exist.
         """
-        if not self.member_repo.get_by_id(member_id):
+        if not self.member_repo.get_by_key(member_id):
             raise ValueError(f"Member {member_id} not found")
 
         trace_id = f"TRC-{uuid.uuid4().hex[:10].upper()}"
@@ -92,7 +92,7 @@ class AuditService:
         trace = self.repository.find_pending_by_member(member_id)
         if not trace:
             raise ValueError(f"No pending authorization for member {member_id}")
-        member = self.member_repo.get_by_id(member_id)
+        member = self.member_repo.get_by_key(member_id)
         if not member:
             raise ValueError(f"Member {member_id} not found")
 
@@ -174,8 +174,8 @@ class AuditService:
 
     def _resolve_plan(self, member: dict) -> dict:
         """member -> policy -> plan."""
-        policy = self.policy_repo.get_by_id(member.get("policyId")) or {}
-        return self.plan_repo.get_by_id(policy.get("planId")) or {}
+        policy = self.policy_repo.get_by_key(member.get("policyId")) or {}
+        return self.plan_repo.get_by_key(policy.get("planId")) or {}
 
     def _coverage(self, member: dict, therapy: str, diagnosis_code: str,
                   therapy_tier: str) -> tuple:
@@ -276,7 +276,7 @@ class AuditService:
         drug-specific, so this holds for any persona, including the cases with no
         step-therapy requirement and no comparable precedent.
         """
-        comparable_ids = [c["_id"] for c in comparable]
+        comparable_ids = [c["claimId"] for c in comparable]
         steps = [
             {
                 "stepId": "STP-001",
@@ -328,7 +328,7 @@ class AuditService:
                     f"Member trial: {step_drug} {best_months} months documented. "
                     + (
                         "Comparable approved cases: "
-                        + ", ".join(c["_id"] for c in comparable)
+                        + ", ".join(c["claimId"] for c in comparable)
                         if comparable else "No comparable approved precedent found."
                     )
                 ),
@@ -374,7 +374,7 @@ class AuditService:
         if comparable:
             facts.append(
                 "comparable cases: "
-                + ", ".join(c["_id"] for c in comparable)
+                + ", ".join(c["claimId"] for c in comparable)
                 + " (approved, similar presentation)"
             )
         else:
@@ -393,7 +393,7 @@ class AuditService:
 
     def _recompute_summary(self, member: dict) -> None:
         """Recompute the member's small cross-domain summary from their traces."""
-        traces = self.repository.find_by_member(member["_id"])
+        traces = self.repository.find_by_member(member["memberId"])
         open_count = sum(
             1 for t in traces if t.get("status") in ("pending", "pending_review")
         )
@@ -409,7 +409,7 @@ class AuditService:
     # --- reads / human review -----------------------------------------------
 
     def get_trace(self, trace_id: str) -> dict:
-        return self.repository.get_by_id(trace_id)
+        return self.repository.get_by_key(trace_id)
 
     def get_member_traces(self, member_id: str) -> list:
         return self.repository.find_by_member(member_id)
@@ -423,12 +423,20 @@ class AuditService:
 
     def open_human_review(self, trace_id: str, medical_director_id: str = None) -> dict:
         """Phase 3a, step 2: assemble the brief for a medical director — the full
-        trace plus the broader member clinical context."""
-        trace = self.repository.get_by_id(trace_id)
+        trace plus the broader member clinical context.
+
+        This is the one read that returns a raw document rather than going through
+        a `response_model`, so `_id` is dropped explicitly: it is an ObjectId,
+        which FastAPI's JSON encoder cannot serialize. Repository reads keep `_id`
+        because `upsert` needs it, so the removal belongs here rather than in the
+        projection.
+        """
+        trace = self.repository.get_by_key(trace_id)
         if not trace:
             raise ValueError(f"Trace {trace_id} not found")
+        trace = {k: v for k, v in trace.items() if k != "_id"}
 
-        member = self.member_repo.get_by_id(trace["subjectRef"]) or {}
+        member = self.member_repo.get_by_key(trace["subjectRef"]) or {}
         member_context = {
             "member_id": trace["subjectRef"],
             "name": f"{member.get('firstName', '')} {member.get('lastName', '')}".strip(),
@@ -450,7 +458,7 @@ class AuditService:
         if decision not in ("approved", "denied"):
             raise ValueError("decision must be 'approved' or 'denied'")
 
-        trace = self.repository.get_by_id(trace_id)
+        trace = self.repository.get_by_key(trace_id)
         if not trace:
             raise ValueError(f"Trace {trace_id} not found")
         review = trace.get("review") or {}
@@ -477,7 +485,7 @@ class AuditService:
         trace["updatedAt"] = now
         self.repository.upsert(trace)
 
-        member = self.member_repo.get_by_id(trace["subjectRef"])
+        member = self.member_repo.get_by_key(trace["subjectRef"])
         if member:
             if decision == "approved":
                 therapy = trace.get("requested_service", "").replace("biologic therapy - ", "")

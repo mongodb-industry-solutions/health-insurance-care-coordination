@@ -80,7 +80,7 @@ class Treatment(BaseModel):
 
 
 class Plan(BaseModel):
-    plan_id: str = Field(alias="_id")
+    plan_id: str = Field(alias="planId")
     plan_name: Optional[str] = Field(default=None, alias="planName")
     plan_type: Optional[str] = Field(default=None, alias="planType")
     network: Optional[str] = None

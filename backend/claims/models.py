@@ -26,7 +26,7 @@ class ClaimProvider(BaseModel):
 
 
 class Claim(BaseModel):
-    claim_id: str = Field(alias="_id")
+    claim_id: str = Field(alias="claimId")
     member_id: str = Field(alias="memberId")
     policy_id: Optional[str] = Field(default=None, alias="policyId")
     provider: Optional[ClaimProvider] = None
@@ -71,7 +71,7 @@ class ComparableClaim(BaseModel):
     Only the fields the agent needs to judge similarity — service, outcome, and
     the presentation_profile — plus ids to cite the precedent.
     """
-    claim_id: str = Field(alias="_id")
+    claim_id: str = Field(alias="claimId")
     member_id: Optional[str] = Field(default=None, alias="memberId")
     service: str
     outcome: str

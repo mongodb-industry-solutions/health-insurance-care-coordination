@@ -17,7 +17,7 @@ class PolicyService:
 
     def get_policy(self, policy_id: str) -> Optional[dict]:
         """Retrieve a policy by its policy number (_id); None if not found."""
-        return self.repository.get_by_id(policy_id)
+        return self.repository.get_by_key(policy_id)
 
     def list_all_policies(self) -> list:
         return self.repository.find()
@@ -27,7 +27,7 @@ class PolicyService:
 
         Returns None when the policy does not exist or its plan is missing.
         """
-        policy = self.repository.get_by_id(policy_id)
+        policy = self.repository.get_by_key(policy_id)
         if not policy:
             return None
-        return self.plan_repo.get_by_id(policy.get("planId"))
+        return self.plan_repo.get_by_key(policy.get("planId"))

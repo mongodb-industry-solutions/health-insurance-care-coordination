@@ -11,11 +11,13 @@ class MemberRepository(Repository):
     """
 
     collection_name = Collections.MEMBERS
+    business_key = "memberId"
 
     def get_clinical_history(self, member_id):
         doc = self.collection.find_one(
-            {"_id": member_id},
-            {"clinical_history": 1, "eligibility": 1, "current_care_plan": 1},
+            {"memberId": member_id},
+            {"memberId": 1, "clinical_history": 1, "eligibility": 1,
+             "current_care_plan": 1},
         )
         return doc
 

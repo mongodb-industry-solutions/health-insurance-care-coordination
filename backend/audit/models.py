@@ -85,7 +85,7 @@ class LinkedTrace(BaseModel):
 
 
 class AuditTrace(BaseModel):
-    trace_id: str = Field(alias="_id")
+    trace_id: str = Field(alias="traceId")
     decision_type: str = Field(default="PRIOR_AUTHORIZATION", alias="decisionType")
     subject_ref: str = Field(alias="subjectRef")
     subject_type: str = Field(default="MEMBER", alias="subjectType")

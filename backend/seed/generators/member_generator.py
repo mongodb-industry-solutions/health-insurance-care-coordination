@@ -139,6 +139,35 @@ def build_interim_response(profile: PatientProfile) -> dict:
     }
 
 
+def build_pending_action(profile: PatientProfile) -> dict:
+    """The physician's recommendation, as a live platform trigger.
+
+    `clinical_history` already records that a doctor recommended something; this
+    is what makes it *actionable* — the member sees a "Diagnosis Follow Up" card
+    with a Start Process button while `status` is `pending`. The insurance agent
+    reads `relatedDiagnosisCode`, `proposedTreatment` and `raisedBy` off it to
+    open the case, flips it to `in_progress` with the trace attached, and marks it
+    `resolved` at closure.
+
+    Seeded at the Phase 0 baseline, so every profile starts `pending` with no
+    trace linked yet.
+    """
+    numeric = "".join(ch for ch in profile.member_id if ch.isdigit())[-5:]
+    _, dx_date, _ = _trial_dates(profile)
+    return {
+        "actionId": f"ACT-{numeric}-01",
+        "type": "DIAGNOSIS_FOLLOW_UP",
+        "status": "pending",
+        "relatedDiagnosisCode": profile.diagnosis_code,
+        "proposedTreatment": profile.considered_therapy,
+        # The clinician who raised it — the referring physician.
+        "raisedBy": profile.managing_provider,
+        "raisedAt": _iso_ts(dx_date),
+        # Populated only once the process starts and a trace exists.
+        "linkedAuditTraceId": None,
+    }
+
+
 def _claim_id(profile: PatientProfile, seq: int) -> str:
     year = profile.enrollment_date[:4]
     numeric = "".join(ch for ch in profile.member_id if ch.isdigit())[-5:]
@@ -300,7 +329,9 @@ def build_policy(profile: PatientProfile) -> dict:
 
     return {
         "_id": policy_number,
-        "policyNumber": policy_number,
+        # Mirrors `_id` — see the note on the member's `memberId`. Renamed from
+        # `policyNumber` for consistency with memberId/planId/claimId/traceId.
+        "policyId": policy_number,
         "policyType": "INDIVIDUAL_HEALTH",
         "planId": profile.plan_id,
         "status": "LAPSED" if lapsed else "ACTIVE",
@@ -322,7 +353,7 @@ def build_policy(profile: PatientProfile) -> dict:
             "paymentFrequency": "MONTHLY",
         },
         "jurisdiction": {"state": profile.state, "country": "US"},
-        "claims": [c["_id"] for c in build_claims(profile)],
+        "claims": [c["claimId"] for c in build_claims(profile)],
         "createdAt": _iso_ts(start),
         "updatedAt": _iso_ts(now),
     }
@@ -355,11 +386,11 @@ def build_member(profile: PatientProfile) -> dict:
     plan = _plan_for(profile)
     eligibility = {
         "status": profile.eligibility_status,
-        "effective_date": profile.enrollment_date,
+        "effectiveDate": profile.enrollment_date,
         "tier": _entitled_tier(plan),
     }
     if profile.coverage_end_date:
-        eligibility["term_date"] = profile.coverage_end_date
+        eligibility["termDate"] = profile.coverage_end_date
 
     diagnoses = [
         {
@@ -415,6 +446,8 @@ def build_member(profile: PatientProfile) -> dict:
             "approved_therapy": None,
             "managing_provider": _provider(profile),
         },
+        # The live, actionable trigger the frontend's "Pending Actions" card reads.
+        "pendingActions": [build_pending_action(profile)],
         # Small computed cross-domain summary. Baseline is PRE-decision: still on
         # first-line therapy, no documented response, no considered biologic, no
         # authorization filed. Phase 1-3 produce all of that.

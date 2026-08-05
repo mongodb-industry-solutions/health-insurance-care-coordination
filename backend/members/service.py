@@ -35,7 +35,7 @@ class MemberService:
 
     def get_member(self, member_id: str) -> dict:
         """Retrieve complete member document."""
-        return self.repository.get_by_id(member_id)
+        return self.repository.get_by_key(member_id)
 
     def get_members_by_policy(self, policy_id: str) -> list:
         """Retrieve all members enrolled under a policy."""
@@ -67,7 +67,7 @@ class MemberService:
         and bumps updatedAt. Returns the updated member, or None if it does not
         exist.
         """
-        member = self.repository.get_by_id(member_id)
+        member = self.repository.get_by_key(member_id)
         if not member:
             return None
 
@@ -113,7 +113,7 @@ class MemberService:
         effective trial stands and the case proceeds. Generic — no condition/drug
         is hardcoded. Returns the updated member, or None if it does not exist.
         """
-        member = self.repository.get_by_id(member_id)
+        member = self.repository.get_by_key(member_id)
         if not member:
             return None
 

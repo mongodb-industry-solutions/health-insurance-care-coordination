@@ -12,6 +12,7 @@ class AuditRepository(Repository):
     """
 
     collection_name = Collections.AUDIT_LOG
+    business_key = "traceId"
 
     def find_by_subject(self, subject_ref):
         """All traces for a subject (member id), chronological."""

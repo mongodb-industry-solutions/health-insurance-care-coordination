@@ -62,9 +62,12 @@ class ClinicalHistory(BaseModel):
 
 class Eligibility(BaseModel):
     status: str
-    effective_date: str
+    effective_date: str = Field(alias="effectiveDate")
     tier: str
-    term_date: Optional[str] = None
+    term_date: Optional[str] = Field(default=None, alias="termDate")
+
+    class Config:
+        populate_by_name = True
 
 
 class ManagingProvider(BaseModel):
@@ -86,6 +89,38 @@ class CurrentCarePlan(BaseModel):
     managing_provider: Optional[ManagingProvider] = None
 
 
+class PendingAction(BaseModel):
+    """An open item on the member's record — the frontend's "Pending Actions" card.
+
+    A `DIAGNOSIS_FOLLOW_UP` action is what triggers the prior-authorization flow:
+    it closes the gap between "a doctor recommended something" (already in
+    `clinical_history`) and "the platform has a live, actionable trigger for it."
+    The insurance agent reads `related_diagnosis_code`, `proposed_treatment` and
+    `raised_by` off it to open the case, flips `status` to `in_progress` with
+    `linked_audit_trace_id` attached, and marks it `resolved` at closure. An
+    escalated case stays `in_progress`, so the frontend can distinguish "awaiting
+    medical director" from "not started".
+
+    Everything but the identity/status triple is optional: a freshly-raised action
+    and a resolved one carry different subsets, and a strict model would fail
+    validation on that variance rather than on anything actually wrong.
+    """
+    action_id: str = Field(alias="actionId")
+    type: str                       # e.g. DIAGNOSIS_FOLLOW_UP
+    status: str                     # pending | in_progress | resolved
+    related_diagnosis_code: Optional[str] = Field(default=None, alias="relatedDiagnosisCode")
+    proposed_treatment: Optional[str] = Field(default=None, alias="proposedTreatment")
+    # The clinician who raised the item — this IS the referring physician; the
+    # model has no separate field for one.
+    raised_by: Optional[str] = Field(default=None, alias="raisedBy")
+    raised_at: Optional[str] = Field(default=None, alias="raisedAt")
+    # Null while still `pending`; populated once a trace exists.
+    linked_audit_trace_id: Optional[str] = Field(default=None, alias="linkedAuditTraceId")
+
+    class Config:
+        populate_by_name = True
+
+
 class Summary(BaseModel):
     active_condition_count: int
     open_authorization_count: int
@@ -94,7 +129,7 @@ class Summary(BaseModel):
 
 
 class MemberClinicalContext(BaseModel):
-    member_id: str = Field(alias="_id")
+    member_id: str = Field(alias="memberId")
     clinical_history: ClinicalHistory
     eligibility: Eligibility
     current_care_plan: Optional[CurrentCarePlan] = None
@@ -104,7 +139,9 @@ class MemberClinicalContext(BaseModel):
 
 
 class Member(BaseModel):
-    member_id: str = Field(alias="_id")
+    # Business key. `_id` is a MongoDB-assigned ObjectId and is not a join key
+    # anywhere in the model.
+    member_id: str = Field(alias="memberId")
     policy_id: str = Field(alias="policyId")
     first_name: str = Field(alias="firstName")
     last_name: str = Field(alias="lastName")
@@ -119,6 +156,9 @@ class Member(BaseModel):
     eligibility: Eligibility
     clinical_history: ClinicalHistory
     current_care_plan: CurrentCarePlan
+    # Open items on the record. Defaults to empty so a member with none still
+    # validates.
+    pending_actions: List[PendingAction] = Field(default=[], alias="pendingActions")
     summary: Summary
     created_at: Optional[str] = Field(default=None, alias="createdAt")
     updated_at: Optional[str] = Field(default=None, alias="updatedAt")

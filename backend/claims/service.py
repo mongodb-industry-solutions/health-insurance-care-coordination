@@ -95,7 +95,7 @@ class ClaimService:
 
     def get_claim(self, claim_id: str) -> dict:
         """Retrieve a specific claim."""
-        return self.repository.get_by_id(claim_id)
+        return self.repository.get_by_key(claim_id)
 
     def list_all_claims(self) -> list:
         """Retrieve all claims."""

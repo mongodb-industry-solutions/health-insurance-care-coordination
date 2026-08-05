@@ -47,7 +47,10 @@ class Jurisdiction(BaseModel):
 
 
 class Policy(BaseModel):
-    policy_number: str = Field(alias="_id")
+    # Business key. Renamed from `policyNumber` for consistency with `memberId`,
+    # `planId`, `claimId` and `traceId`; `_id` is an ObjectId and is not a join
+    # key anywhere in the model.
+    policy_id: str = Field(alias="policyId")
     policy_type: Optional[str] = Field(default=None, alias="policyType")
     plan_id: str = Field(alias="planId")
     status: str

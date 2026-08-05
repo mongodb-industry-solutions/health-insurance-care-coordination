@@ -10,3 +10,4 @@ class PlanRepository(Repository):
     """
 
     collection_name = Collections.PLANS
+    business_key = "planId"

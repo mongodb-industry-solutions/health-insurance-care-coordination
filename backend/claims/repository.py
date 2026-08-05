@@ -12,6 +12,7 @@ class ClaimRepository(Repository):
     """
 
     collection_name = Collections.CLAIMS
+    business_key = "claimId"
 
     def find_by_member(self, member_id):
         return self.find({"memberId": member_id})
@@ -61,6 +62,7 @@ class ClaimRepository(Repository):
         if exclude_member:
             query["memberId"] = {"$ne": exclude_member}
         projection = {
+            "claimId": 1,
             "service": 1,
             "outcome": 1,
             "presentation_profile": 1,
