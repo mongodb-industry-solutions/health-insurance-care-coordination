@@ -1,11 +1,16 @@
 """
-Insurance agent starter template built on the Magenta SDK.
+Prior-authorization agent built on the Magenta SDK.
 
-This template demonstrates:
-- @app.tool for structured tool registration
-- agent.yaml-driven runtime features and model hints
-- MongoDB-backed policy and claim storage
-- LangGraph orchestration with human review via suspend/resume
+Implements the data model and tool catalog documented in
+`insurance-agent/sources/Prior_Authorization_Agent_Reference.md`:
+
+- the Member document is read once as the operational foundation, with Policy,
+  Plan, Claim, Audit Log and Clinical Guideline read alongside it
+- every reasoning step is written to an Audit Log trace tagged with the memory
+  type it represents (semantic / taxonomic / episodic / procedural)
+- bounded authority is enforced in the tools themselves: the agent may close
+  administrative determinations and high-confidence approvals, but a clinical
+  denial can only ever be closed by a medical director
 
 The platform launches this code in supported runtime roles:
     RUNNER_MODE=aer            -> Full LangGraph execution
@@ -16,10 +21,9 @@ The platform launches this code in supported runtime roles:
 import json
 import logging
 import os
-import random
 import sys
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Annotated, Literal, Optional, TypedDict, cast
 
 from dotenv import load_dotenv
@@ -30,14 +34,21 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from magenta_sdklanggraph import App
-from runner_shared.context import get_current_session_id
 from runner_shared.models import SuspendPayload
 
-from agent_health_insurance_coordination.policy_store import (
-    Claim,
-    Policy,
-    create_claim_store,
-    create_policy_store,
+from agent_health_insurance_coordination.pa_store import (
+    CLINICAL_MEMORY_TYPES,
+    ClaimProvider,
+    NewClaim,
+    ReasoningStep,
+    aggregate_confidence,
+    check_treatment_coverage as coverage_for_plan,
+    create_prior_auth_store,
+    evaluate_eligibility,
+    evaluate_step_therapy as apply_step_therapy_gate,
+    new_claim_id,
+    summarize_trial_history,
+    today_iso,
 )
 
 # =============================================================================
@@ -57,9 +68,11 @@ load_dotenv()
 # Configuration
 # =============================================================================
 
-# MongoDB config - application's own database for policies, claims, etc.
+# MongoDB config. The prior-authorization data model lives in
+# `health_insurance_agent`, which is created and seeded outside this app —
+# never point this at another database and never reshape what is already there.
 MONGODB_URI = os.environ.get("MONGODB_URI", "")
-MONGODB_DATABASE = os.environ.get("MONGODB_DATABASE", "insurance_agent")
+MONGODB_DATABASE = os.environ.get("MONGODB_DATABASE", "health_insurance_agent")
 
 
 def _build_runtime_llm() -> BaseChatModel:
@@ -155,881 +168,1137 @@ app = App(
 )
 logger.info("✅ App created")
 
-policy_store = create_policy_store(MONGODB_URI, MONGODB_DATABASE)
-claim_store = create_claim_store(MONGODB_URI, MONGODB_DATABASE)
+store = create_prior_auth_store(MONGODB_URI, MONGODB_DATABASE)
 
 # =============================================================================
-# Risk Assessment Constants (for claims analysis)
+# Decision Constants
 # =============================================================================
 
-# Keywords in claim description that indicate high risk
-HIGH_RISK_KEYWORDS = ["total loss", "totaled", "stolen", "theft", "fire", "flood"]
+# Outcomes the model recognises, shared by audit_log.outcome.decision and
+# claims.status.
+VALID_DECISIONS = ("approved", "approved_restricted", "denied", "pending")
 
-# Keywords in claim description that indicate medium risk
-MEDIUM_RISK_KEYWORDS = ["significant damage", "major repair", "structural"]
+# Grounds on which the agent itself may close a case (Guardrails table, §7 of
+# the reference document). Everything else goes to a medical director.
+AGENT_CLOSABLE_REASONS = (
+    "benefit_exclusion",
+    "eligibility_lapsed",
+    "clinical_approval_within_threshold",
+)
 
-# Numeric thresholds for risk assessment
-LOW_RISK_THRESHOLD = 1000  # Claims under $1,000 can be auto-approved
-MEDIUM_RISK_THRESHOLD = 5000  # Claims $5,000+ need review
-HIGH_RISK_THRESHOLD = 15000  # Claims $15,000+ require human review
+# Used when a guideline is unavailable, so an approval can never be closed by
+# the agent on a permissive default.
+DEFAULT_CONFIDENCE_THRESHOLD = 0.90
 
-# Risk score thresholds (0.0 - 1.0)
-MEDIUM_RISK_SCORE = 0.4
-HIGH_RISK_SCORE = 0.6
+ESCALATION_REASON_CLINICAL_DENIAL = "clinical_denial_requires_physician_closure"
+ESCALATION_REASON_LOW_CONFIDENCE = "confidence_below_guideline_threshold"
 
 
 # =============================================================================
-# Tools - Using @app.tool for secure, logged execution
+# Tool helpers
 # =============================================================================
 
 
-@app.tool(is_local=False)
-def lookup_policy(policy_number: str) -> str:
-    """Look up an insurance policy by policy number."""
-    policy = policy_store.get_policy(policy_number)
-    if policy:
-        return json.dumps(policy, indent=2)
-    return json.dumps({"error": f"No policy found: {policy_number}"})
-
-
-@app.tool(is_local=False)
-def get_quote(
-    vehicle_year: int,
-    vehicle_make: str,
-    vehicle_model: str,
-    coverage_level: str,
-    driver_age: int = 0,
-) -> str:
-    """Generate a personalized auto insurance quote.
-
-    Uses customer memory to apply loyalty discounts and personalize pricing.
-
-    Args:
-        vehicle_year: Year of the vehicle (e.g., 2022)
-        vehicle_make: Make of the vehicle (e.g., "Toyota")
-        vehicle_model: Model of the vehicle (e.g., "Camry")
-        coverage_level: Coverage level (Basic, Standard, Comprehensive)
-        driver_age: Primary driver's age (optional, affects pricing)
-    """
-    user_id = app.get_current_user_id()
-
-    # Base pricing by coverage level
-    base_prices = {"basic": 80, "standard": 120, "comprehensive": 180}
-    base = base_prices.get(coverage_level.lower(), 120)
-
-    # Vehicle age factor (newer cars cost more to insure)
-    current_year = datetime.now().year
-    vehicle_age = current_year - vehicle_year
-    if vehicle_age <= 2:
-        base *= 1.2  # New car premium
-    elif vehicle_age >= 10:
-        base *= 0.85  # Older car discount
-
-    # Age factor (young drivers pay more)
-    if driver_age > 0:
-        if driver_age < 25:
-            base *= 1.5  # Young driver surcharge
-        elif driver_age >= 55:
-            base *= 0.9  # Senior discount
-
-    # Check memory for returning customer benefits
-    loyalty_discount = 0
-    customer_notes = []
-
-    # Check if customer has existing policies (true returning customer indicator)
-    existing_policies = policy_store.list_by_user_id(user_id)  # type: ignore[arg-type]  # user_id is str at runtime
-    has_existing_policies = len(existing_policies) > 0
-
-    # Check episodic memory for past conversations
-    past_episodes = app.memory.search_episodes(query="policy quote conversation", top_k=3)
-    has_past_interactions = len(past_episodes) > 0 if past_episodes else False
-
-    # Only apply loyalty discount if customer has existing policies OR past interactions
-    if has_existing_policies or has_past_interactions:
-        customer_notes.append("Returning customer - 10% loyalty discount applied")
-        loyalty_discount = 0.10
-
-        # Check semantic memory for good driving record
-        context = app.memory.build_context(
-            query="driving history record accidents",
-            user_id=user_id,
-        )
-        memory_context = (
-            context.formatted_context if isinstance(context.formatted_context, str) else ""
-        )
-        if memory_context:
-            if (
-                "clean driving" in memory_context.lower()
-                or "no accidents" in memory_context.lower()
-            ):
-                customer_notes.append("Good driver discount - additional 5% off")
-                loyalty_discount += 0.05
-
-    # Apply loyalty discount
-    final_price = base * (1 - loyalty_discount)
-
-    quote = {
-        "quote_id": f"QT-{random.randint(100000, 999999)}",
-        "vehicle": f"{vehicle_year} {vehicle_make} {vehicle_model}",
-        "coverage_level": coverage_level.title(),
-        "monthly_premium": f"${round(final_price, 2)}",
-        "annual_premium": f"${round(final_price * 12, 2)}",
-        "valid_until": (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
-        "deductible": "$500" if coverage_level.lower() != "basic" else "$1000",
-    }
-
-    if customer_notes:
-        quote["applied_discounts"] = customer_notes  # type: ignore[arg-type]  # list assigned to TypedDict str field
-
-    if not has_existing_policies and not has_past_interactions:
-        quote["tip"] = (
-            "Purchase a policy to become a returning customer and get loyalty discounts on future quotes!"
-        )
-
-    return json.dumps(quote, indent=2)
-
-
-@app.tool(is_local=False)
-def create_policy(
-    holder_name: str,
-    holder_email: str,
-    policy_type: str,
-    coverage: str,
-    premium: str,
-    car_model: str,
-    car_year: int,
-    car_edition: str,
-    deductible: str = "$500",
-) -> str:
-    """Create a new insurance policy for a customer.
-
-    Args:
-        holder_name: Full name of the policy holder
-        holder_email: Email address of the policy holder
-        policy_type: Type of insurance (Auto, Home, Life)
-        coverage: Coverage level (Basic, Standard, Comprehensive)
-        premium: Monthly premium amount (e.g., "$150/month")
-        car_model: Vehicle model (e.g., "Camry", "Model 3")
-        car_year: Vehicle year (e.g., 2024)
-        car_edition: Vehicle edition/trim (e.g., "SE", "Long Range")
-        deductible: Deductible amount (default: "$500")
-    """
-    user_id = app.get_current_user_id()
-    policy_number = f"POL-{random.randint(10000, 99999)}"
-
-    policy = Policy(
-        policy_number=policy_number,
-        user_id=user_id,  # type: ignore[arg-type]  # user_id is str at runtime
-        holder_name=holder_name,
-        holder_email=holder_email,
-        type=f"{policy_type} Insurance",
-        coverage=coverage,
-        premium=premium,
-        deductible=deductible,
-        car_model=car_model,
-        car_year=car_year,
-        car_edition=car_edition,
+def _no_store() -> str:
+    return json.dumps(
+        {
+            "error": "MongoDB is not configured. Set MONGODB_URI in .env; "
+            f"MONGODB_DATABASE must remain {MONGODB_DATABASE!r}."
+        }
     )
 
-    try:
-        created = policy_store.create_policy(policy)
-        return json.dumps({"status": "created", "policy": created}, indent=2)
-    except Exception as e:
-        return json.dumps({"error": str(e)})
 
+def _split_list(raw: str) -> list[str]:
+    """Parse a delimited tool argument into a list.
 
-@app.tool(is_local=False)
-def list_customer_policies() -> str:
-    """List all insurance policies for the current customer.
-
-    Uses the current user_id to identify the customer.
+    Tool arguments stay scalar strings so every provider's function-calling
+    schema handles them identically. `;`, newlines and `|` separate items;
+    spaces never do, because the items themselves contain spaces.
     """
-    user_id = app.get_current_user_id()
-    policies = policy_store.list_by_user_id(user_id)  # type: ignore[arg-type]  # user_id is str at runtime
-    if policies:
-        return json.dumps({"count": len(policies), "policies": policies}, indent=2)
-    return json.dumps({"count": 0, "message": "No policies found for this customer"})
+    if not raw:
+        return []
+    for delimiter in ("\n", "|"):
+        raw = raw.replace(delimiter, ";")
+    return [part.strip() for part in raw.split(";") if part.strip()]
+
+
+def _as_object(raw: str) -> dict:
+    """Parse a step input/output argument, accepting JSON or plain prose."""
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return {"summary": raw}
+    return parsed if isinstance(parsed, dict) else {"value": parsed}
+
+
+def _guideline_threshold(guideline: Optional[dict]) -> float:
+    if not guideline:
+        return DEFAULT_CONFIDENCE_THRESHOLD
+    return float(guideline.get("confidence_threshold") or DEFAULT_CONFIDENCE_THRESHOLD)
+
+
+def _has_clinical_reasoning(trace: dict) -> bool:
+    """True when episodic/procedural steps were recorded on this trace.
+
+    This is what distinguishes a clinical determination from an administrative
+    one, and therefore who is allowed to close it.
+    """
+    return any(
+        (step.get("memoryType") or "") in CLINICAL_MEMORY_TYPES for step in trace.get("steps") or []
+    )
 
 
 # =============================================================================
-# Claims Tools - Filing, analysis, and resolution
+# Member context tools
 # =============================================================================
 
 
 @app.tool(is_local=False)
-def file_claim(
-    policy_number: str,
-    claim_type: str,
-    claim_amount: float,
-    description: str,
-) -> str:
-    """File a new insurance claim for a policy.
+def get_member_profile(member_id: str) -> str:
+    """Retrieve the full Member record — the starting point of every request.
 
-    Use this when a customer wants to file a claim for an incident.
+    Returns eligibility, demographics, clinical history (diagnoses, medications,
+    treatment responses, clinical notes), the current care plan and the rolling
+    summary. Call this before any other tool when handling a new request.
 
     Args:
-        policy_number: The policy number to file the claim against (e.g., "POL-12345")
-        claim_type: Type of claim (collision, theft, comprehensive, glass, vandalism)
-        claim_amount: Estimated or actual claim amount in dollars
-        description: Description of the incident
+        member_id: Member business key (e.g. "MBR-2026-44109")
     """
-    user_id = app.get_current_user_id()
+    if store is None:
+        return _no_store()
+    member = store.get_member(member_id)
+    if not member:
+        return json.dumps({"error": f"No member found: {member_id}"})
+    return json.dumps(member, indent=2, default=str)
 
-    # Verify the policy exists and belongs to this user
-    policy = policy_store.get_policy(policy_number)
+
+@app.tool(is_local=False)
+def get_member_claims(member_id: str) -> str:
+    """List every claim filed for a member, in service-date order.
+
+    Use this to see the member's care and pharmacy history, including the fills
+    that reveal refill gaps in a step-therapy trial.
+
+    Args:
+        member_id: Member business key (e.g. "MBR-2026-44109")
+    """
+    if store is None:
+        return _no_store()
+    claims = store.list_claims_by_member(member_id)
+    return json.dumps({"count": len(claims), "claims": claims}, indent=2, default=str)
+
+
+@app.tool(is_local=False)
+def get_comparable_cases(
+    condition: str,
+    drug_class: str = "",
+    prior_therapy_months: float = 0.0,
+) -> str:
+    """Episodic memory across members: prior outcomes for a similar clinical profile.
+
+    Returns aggregate counts, trace/claim identifiers and de-identified
+    presentation profiles only — never another member's PHI. Use it to support
+    the current case's reasoning, never to replace it.
+
+    Args:
+        condition: ICD-10 code (e.g. "M06.9")
+        drug_class: Drug class being requested (e.g. "biologic")
+        prior_therapy_months: Documented months of prior conventional therapy
+    """
+    if store is None:
+        return _no_store()
+    result = store.find_comparable_cases(condition, drug_class, prior_therapy_months)
+    return json.dumps(result, indent=2, default=str)
+
+
+@app.tool(is_local=False)
+def update_member_summary(
+    member_id: str,
+    last_authorization_status: str,
+    open_authorization_delta: int = 0,
+) -> str:
+    """Refresh Member.summary after a decision closes. Never leave it stale.
+
+    Run this at the end of every closed decision so the next request starts from
+    an already-informed record.
+
+    Args:
+        member_id: Member business key
+        last_authorization_status: Status of the decision just recorded
+            (approved, approved_restricted, denied, pending_review)
+        open_authorization_delta: +1 when opening an authorization, -1 when one closes
+    """
+    if store is None:
+        return _no_store()
+    summary = store.update_member_summary(
+        member_id, last_authorization_status, open_authorization_delta
+    )
+    if summary is None:
+        return json.dumps({"error": f"No member found: {member_id}"})
+    return json.dumps({"memberId": member_id, "summary": summary}, indent=2, default=str)
+
+
+# =============================================================================
+# Policy & Plan tools
+# =============================================================================
+
+
+@app.tool(is_local=False)
+def get_policy_by_member(member_id: str) -> str:
+    """Retrieve the Policy held by a member (Member.policyId -> Policy.policyNumber).
+
+    Args:
+        member_id: Member business key (e.g. "MBR-2026-44109")
+    """
+    if store is None:
+        return _no_store()
+    policy = store.get_policy_by_member(member_id)
     if not policy:
-        return json.dumps({"error": f"Policy not found: {policy_number}"})
+        return json.dumps({"error": f"No policy found for member: {member_id}"})
+    return json.dumps(policy, indent=2, default=str)
 
-    if policy.get("user_id") != user_id:
-        return json.dumps({"error": "Policy does not belong to current user"})
 
-    if policy.get("status") != "Active":
-        return json.dumps({"error": f"Policy is not active: {policy.get('status')}"})
+@app.tool(is_local=False)
+def verify_eligibility_on_date(policy_id: str, service_date: str = "") -> str:
+    """First administrative gate: was coverage active on the requested service date?
 
-    # Generate claim ID
-    claim_id = f"CLM-{random.randint(10000, 99999)}"
+    Evaluates policy status together with the effective period. If `eligible` is
+    false with reason "eligibility_lapsed", STOP: record the gate on the trace,
+    recommend denial, and close it yourself as an administrative determination.
+    No clinical reasoning should run.
 
-    # Create the claim
-    claim = Claim(
-        claim_id=claim_id,
-        policy_number=policy_number.upper(),
-        user_id=user_id,  # type: ignore[arg-type]  # user_id is str at runtime
-        claim_type=claim_type.lower(),
-        claim_amount=claim_amount,
-        description=description,
-    )
+    Args:
+        policy_id: Policy number (e.g. "POL-2026-90733")
+        service_date: Date of service as YYYY-MM-DD. Defaults to today.
+    """
+    if store is None:
+        return _no_store()
+    policy = store.get_policy(policy_id)
+    if not policy:
+        return json.dumps({"error": f"No policy found: {policy_id}"})
+    result = evaluate_eligibility(policy, service_date or today_iso())
+    result["policyId"] = policy.get("policyNumber")
+    result["planId"] = policy.get("planId")
+    result["serviceDate"] = service_date or today_iso()
+    return json.dumps(result, indent=2, default=str)
 
-    try:
-        created = claim_store.create_claim(claim)
+
+@app.tool(is_local=False)
+def get_plan_by_policy(plan_id: str) -> str:
+    """Retrieve the Plan a policy is enrolled in, including treatments[] and steps[].
+
+    Args:
+        plan_id: Plan business key from Policy.planId (e.g. "PLAN-PPO-7731")
+    """
+    if store is None:
+        return _no_store()
+    plan = store.get_plan(plan_id)
+    if not plan:
+        return json.dumps({"error": f"No plan found: {plan_id}"})
+    return json.dumps(plan, indent=2, default=str)
+
+
+@app.tool(is_local=False)
+def check_treatment_coverage(
+    plan_id: str,
+    treatment_code: str = "",
+    condition: str = "",
+    drug: str = "",
+) -> str:
+    """Second administrative gate: does the plan cover this treatment, and which steps?
+
+    Resolves the treatment by code + condition, or by drug name + condition when
+    no code is known. Interpret the result as follows:
+    - covered false -> STOP. Recommend denial and close it yourself as a
+      benefit-exclusion administrative determination; no clinical reasoning runs.
+    - restriction "partial" -> the decision must be `approved_restricted`, never a
+      plain approval; the member carries the cost of the uncovered steps.
+
+    Args:
+        plan_id: Plan business key (e.g. "PLAN-PPO-7731")
+        treatment_code: Treatment/procedure code (e.g. "J3590")
+        condition: ICD-10 code the treatment is requested for (e.g. "M06.9")
+        drug: Drug name, used when no treatment code is available (e.g. "secukinumab")
+    """
+    if store is None:
+        return _no_store()
+    plan = store.get_plan(plan_id)
+    if not plan:
+        return json.dumps({"error": f"No plan found: {plan_id}"})
+    result = coverage_for_plan(plan, treatment_code, condition, drug)
+    result["planId"] = plan.get("planId")
+    return json.dumps(result, indent=2, default=str)
+
+
+# =============================================================================
+# Clinical guideline / reasoning tools
+# =============================================================================
+
+
+@app.tool(is_local=False)
+def get_applicable_guideline(condition: str) -> str:
+    """Retrieve the current Clinical Guideline for a condition.
+
+    This is the reference data the clinical steps reason over: drug
+    classification (taxonomic memory), step-therapy criteria (procedural
+    memory), and the `confidence_threshold` the bounded-authority gate uses.
+    Its `_id` is what the trace records as contextSnapshot.guidelineRef.
+
+    Args:
+        condition: ICD-10 code (e.g. "M06.9")
+    """
+    if store is None:
+        return _no_store()
+    guideline = store.get_guideline_for_condition(condition)
+    if not guideline:
+        return json.dumps({"found": False, "condition": condition})
+    return json.dumps({"found": True, "guidelineRef": guideline["_id"], **guideline}, default=str)
+
+
+@app.tool(is_local=False)
+def normalize_clinical_concept(
+    requested_drug: str,
+    member_id: str = "",
+    member_diagnosis_codes: str = "",
+) -> str:
+    """Semantic memory: confirm the requested treatment and the member's on-file
+    diagnosis refer to the same clinical concept, even across vocabularies.
+
+    Reads the member's diagnoses straight off the Member record (pass
+    `member_diagnosis_codes` only to override them), and matches them against
+    the conditions the guidelines classify this drug under.
+
+    Args:
+        requested_drug: Drug being requested (e.g. "secukinumab")
+        member_id: Member business key, used to read diagnoses from the record
+        member_diagnosis_codes: Optional override, e.g. "M06.9;I10"
+    """
+    if store is None:
+        return _no_store()
+
+    codes = [c.upper() for c in _split_list(member_diagnosis_codes)]
+    if not codes and member_id:
+        member = store.get_member(member_id)
+        if not member:
+            return json.dumps({"error": f"No member found: {member_id}"})
+        codes = [
+            (d.get("code") or "").upper()
+            for d in ((member.get("clinical_history") or {}).get("diagnoses") or [])
+            if (d.get("status") or "active") == "active"
+        ]
+    if not codes:
+        return json.dumps(
+            {"matched": False, "reason": "no_diagnosis_codes_available", "confidence": 0.0}
+        )
+
+    guidelines = store.find_guidelines_classifying(requested_drug)
+    guideline_conditions = [(g.get("condition") or "").upper() for g in guidelines]
+    matched = [c for c in codes if c in guideline_conditions]
+
+    if matched:
         return json.dumps(
             {
-                "status": "filed",
-                "claim": created,
-                "message": f"Claim {claim_id} has been filed successfully. "
-                "It will now be analyzed for risk assessment.",
+                "matched": True,
+                "matchedCondition": matched[0],
+                "guidelineRef": next(
+                    g["_id"] for g in guidelines if (g.get("condition") or "").upper() == matched[0]
+                ),
+                "confidence": 0.98,
+                "detail": (
+                    f"Matched requested therapy {requested_drug} to condition {matched[0]} "
+                    "already on the member record."
+                ),
             },
             indent=2,
         )
-    except Exception as e:
-        return json.dumps({"error": str(e)})
+    return json.dumps(
+        {
+            "matched": False,
+            "matchedCondition": None,
+            "memberDiagnosisCodes": codes,
+            "guidelineConditions": guideline_conditions,
+            "confidence": 0.40,
+            "detail": (
+                f"No guideline classifies {requested_drug} for any condition on this member's "
+                "record. Treat the clinical concept as unconfirmed and escalate."
+            ),
+        },
+        indent=2,
+    )
 
 
-@app.tool(is_local=False, catalog="openai/chat")
-def analyze_claim_risk(claim_id: str, policy_number: str) -> str:
-    """Analyze a claim for risk assessment.
+@app.tool(is_local=False)
+def classify_treatment(drug: str, condition: str) -> str:
+    """Taxonomic memory: a treatment's class, tier and prior-auth status.
 
-    This tool analyzes the claim against policy details and historical patterns
-    to determine the risk level and recommendation.
+    Reads Clinical Guideline.classification. When the drug is not individually
+    enumerated, reasons from the category — the guideline for the condition
+    still fixes the coverage tier — and returns a lower confidence to reflect
+    that the answer was inferred rather than stated.
 
     Args:
-        claim_id: The claim ID to analyze (e.g., "CLM-123456")
-        policy_number: The associated policy number (e.g., "POL-123")
-
-    Returns:
-        Risk assessment with recommendation (auto_approve, review_recommended, manual_review_required)
+        drug: Drug name (e.g. "secukinumab")
+        condition: ICD-10 code (e.g. "M06.9")
     """
-    # Get claim details
-    claim = claim_store.get_claim(claim_id)
-    if not claim:
-        return json.dumps({"error": f"Claim not found: {claim_id}"})
+    if store is None:
+        return _no_store()
+    guideline = store.get_guideline_for_condition(condition)
+    if not guideline:
+        return json.dumps(
+            {"error": f"No clinical guideline on file for condition {condition}", "confidence": 0.0}
+        )
 
-    # Get policy details for risk analysis
-    policy = policy_store.get_policy(policy_number)
-    if not policy:
-        return json.dumps({"error": f"Policy not found: {policy_number}"})
+    classification = (guideline.get("classification") or {}).get(drug.strip().lower())
+    if classification:
+        return json.dumps(
+            {
+                "class": classification.get("class"),
+                "tier": classification.get("tier"),
+                "priorAuthRequired": classification.get("prior_auth_required"),
+                "guidelineRef": guideline["_id"],
+                "inferred": False,
+                "confidence": 0.97,
+                "detail": (
+                    f"Classified {drug} as {classification.get('class')} -> "
+                    f"{classification.get('tier')} tier; prior auth required: "
+                    f"{classification.get('prior_auth_required')}."
+                ),
+            },
+            indent=2,
+        )
 
-    # Build context for risk analysis
-    claim_amount = claim.get("claim_amount", 0)
-    claim_type = claim.get("claim_type", "")
-    description = claim.get("description", "")
-    policy_risk_score = policy.get("risk_score", 0.3)
-    coverage_limit = policy.get("coverage_limit", 50000)
-
-    # Check for previous claims on this policy
-    previous_claims = claim_store.list_by_policy(policy_number)
-    previous_claims = [c for c in previous_claims if c.get("claim_id") != claim_id.upper()]
-
-    # Combined text for keyword analysis
-    description_lower = f"{description} {claim_type}".lower()
-
-    # Determine risk level based on numeric thresholds and keywords
-    is_high_risk = (
-        claim_amount >= HIGH_RISK_THRESHOLD
-        or policy_risk_score >= HIGH_RISK_SCORE
-        or claim_amount > coverage_limit
-        or any(kw in description_lower for kw in HIGH_RISK_KEYWORDS)
-    )
-
-    is_medium_risk = (
-        claim_amount >= MEDIUM_RISK_THRESHOLD
-        or policy_risk_score >= MEDIUM_RISK_SCORE
-        or len(previous_claims) >= 2  # Multiple previous claims
-        or any(kw in description_lower for kw in MEDIUM_RISK_KEYWORDS)
-    )
-
-    # Build analysis result
-    if is_high_risk:
-        result = {
-            "risk_assessment": "high",
-            "confidence": 0.65,
-            "recommendation": "manual_review_required",
-            "reasoning": "Multiple risk indicators detected. Human review strongly recommended.",
-            "factors": [],
-        }
-        if claim_amount > coverage_limit:
-            result["factors"].append(
-                f"Claim amount (${claim_amount}) exceeds coverage limit (${coverage_limit})"
-            )
-        if policy_risk_score >= HIGH_RISK_SCORE:
-            result["factors"].append(f"High policy risk score: {policy_risk_score}")
-        if claim_amount >= HIGH_RISK_THRESHOLD:
-            result["factors"].append(f"High claim amount: ${claim_amount}")
-        if any(kw in description_lower for kw in HIGH_RISK_KEYWORDS):
-            result["factors"].append("High-risk keywords detected in claim description")
-    elif is_medium_risk:
-        result = {
-            "risk_assessment": "medium",
-            "confidence": 0.72,
-            "recommendation": "review_recommended",
-            "reasoning": "Claim amount is elevated or patterns warrant review.",
-            "factors": [],
-        }
-        if claim_amount >= MEDIUM_RISK_THRESHOLD:
-            result["factors"].append(f"Elevated claim amount: ${claim_amount}")
-        if len(previous_claims) >= 2:
-            result["factors"].append(f"Multiple previous claims: {len(previous_claims)}")
-        if policy_risk_score >= MEDIUM_RISK_SCORE:
-            result["factors"].append(f"Elevated policy risk score: {policy_risk_score}")
-    else:
-        result = {
-            "risk_assessment": "low",
-            "confidence": 0.85,
-            "recommendation": "auto_approve",
-            "reasoning": "Claim amount is within normal range, no fraud indicators detected.",
-            "factors": [
-                f"Claim amount (${claim_amount}) is reasonable",
-                f"Policy risk score ({policy_risk_score}) is low",
-                "No concerning patterns in claim description",
-            ],
-        }
-
-    # Update claim with risk assessment
-    claim_store.update_claim(
-        claim_id,
+    inferred_tier = (guideline.get("criteria") or {}).get("coverage_tier")
+    return json.dumps(
         {
-            "risk_assessment": result["risk_assessment"],
-            "risk_confidence": result["confidence"],
-            "recommendation": result["recommendation"],
-            "status": "under_review",
+            "class": None,
+            "tier": inferred_tier,
+            "priorAuthRequired": True,
+            "guidelineRef": guideline["_id"],
+            "inferred": True,
+            "confidence": 0.75,
+            "detail": (
+                f"{drug} is not individually enumerated in {guideline['_id']}. Reasoning from "
+                f"category: treatments for {condition} fall under the {inferred_tier} tier and "
+                "require prior authorization. Confidence reduced because this was inferred."
+            ),
         },
+        indent=2,
     )
 
-    return json.dumps(result, indent=2)
+
+@app.tool(is_local=False)
+def evaluate_step_therapy(
+    condition: str,
+    documented_drug: str,
+    documented_months: float,
+    required_drug: str = "",
+    required_months: float = 0.0,
+) -> str:
+    """Procedural memory: apply the encoded step-therapy criteria to the documented trial.
+
+    When `required_drug`/`required_months` are omitted they are read from the
+    guideline for the condition, so the same versioned criteria are applied to
+    every member with that condition.
+
+    Args:
+        condition: ICD-10 code (e.g. "M06.9")
+        documented_drug: Conventional therapy documented on the member record
+        documented_months: Effective documented trial duration in months
+        required_drug: Optional override of the required conventional therapy
+        required_months: Optional override of the required minimum duration
+    """
+    if store is None:
+        return _no_store()
+    guideline = store.get_guideline_for_condition(condition)
+    criteria = ((guideline or {}).get("criteria") or {}).get("step_therapy") or {}
+    needed_drug = required_drug or criteria.get("drug") or ""
+    needed_months = float(required_months or criteria.get("min_months") or 0)
+
+    if not needed_drug or not needed_months:
+        return json.dumps(
+            {
+                "error": f"No step-therapy criteria on file for condition {condition}",
+                "satisfied": False,
+                "confidence": 0.0,
+            }
+        )
+
+    result = apply_step_therapy_gate(float(documented_months), needed_months)
+    drug_matches = documented_drug.strip().lower() == needed_drug.strip().lower()
+    if not drug_matches:
+        result["satisfied"] = False
+        result["confidence"] = 0.85
+        result["detail"] = (
+            f"Step therapy requires {needed_drug}; the documented trial is {documented_drug} "
+            "— required conventional therapy not documented."
+        )
+
+    result.update(
+        {
+            "condition": condition.upper(),
+            "requiredDrug": needed_drug,
+            "requiredMonths": needed_months,
+            "documentedDrug": documented_drug,
+            "documentedMonths": documented_months,
+            "guidelineRef": (guideline or {}).get("_id"),
+            "confidenceThreshold": _guideline_threshold(guideline),
+        }
+    )
+    return json.dumps(result, indent=2, default=str)
+
+
+@app.tool(is_local=False)
+def review_treatment_response_history(member_id: str, drug: str) -> str:
+    """Episodic memory, within-member: investigate the member's own trial history.
+
+    Establishes the effective trial duration and surfaces anomalies (a
+    medication hold, a refill gap) before one invalidates an otherwise adequate
+    trial. An anomaly that no clinical note explains must NOT be resolved in the
+    member's favour: it lowers confidence and leans toward escalation.
+
+    Args:
+        member_id: Member business key
+        drug: Conventional therapy to review (e.g. "Methotrexate")
+    """
+    if store is None:
+        return _no_store()
+    member = store.get_member(member_id)
+    if not member:
+        return json.dumps({"error": f"No member found: {member_id}"})
+
+    result = summarize_trial_history(member, drug)
+    unexplained = result["anomalyDetected"] and not result["anomalyExplained"]
+    result["confidence"] = 0.60 if unexplained else 0.95
+    if unexplained:
+        result["detail"] = (
+            f"An interruption in the {drug} trial is on file but no clinical note explains it. "
+            "Do not credit the full duration — reduce confidence and escalate."
+        )
+    elif result["anomalyDetected"]:
+        result["detail"] = (
+            f"Member trial: {drug} {result['effectiveTrialMonths']:g} months documented. "
+            f"An interruption was investigated and explained: {result['explanation']}"
+        )
+    else:
+        result["detail"] = (
+            f"Member trial: {drug} {result['effectiveTrialMonths']:g} months documented; "
+            "no interruptions on file."
+        )
+    return json.dumps(result, indent=2, default=str)
+
+
+@app.tool(is_local=False)
+def compute_decision_confidence(step_confidences: str, criteria_satisfied: bool = True) -> str:
+    """Aggregate step confidences into the overall decision confidence.
+
+    The aggregation is fixed and documented, because the bounded-authority gate
+    keys off this number: the overall confidence is the MINIMUM of the step
+    confidences, minus a fixed 0.55 penalty when a clinical criterion was
+    evaluated and not satisfied. High confidence that a criterion failed is not
+    confidence in the adverse decision that follows.
+
+    Args:
+        step_confidences: Step confidences, e.g. "0.98;0.97;0.95;0.90"
+        criteria_satisfied: False when a clinical gate (e.g. step therapy) failed
+    """
+    values: list[float] = []
+    for raw in _split_list(step_confidences.replace(",", ";")):
+        try:
+            values.append(float(raw))
+        except ValueError:
+            return json.dumps({"error": f"Not a confidence value: {raw!r}"})
+    if not values:
+        return json.dumps({"error": "No step confidences provided"})
+
+    overall = aggregate_confidence(values, criteria_satisfied)
+    return json.dumps(
+        {
+            "overallConfidence": overall,
+            "stepConfidences": values,
+            "criteriaSatisfied": criteria_satisfied,
+            "method": "min(stepConfidences) - 0.55 when a clinical criterion is not satisfied",
+        },
+        indent=2,
+    )
+
+
+# =============================================================================
+# Claim tools
+# =============================================================================
+
+
+@app.tool(is_local=False)
+def create_claim(
+    member_id: str,
+    procedure_code: str,
+    procedure_desc: str,
+    diagnosis_code: str,
+    diagnosis_display: str,
+    billed_amt: float,
+    claim_type: str = "specialty_pharmacy",
+    service_date: str = "",
+) -> str:
+    """Open a claim for a requested or delivered service, with status "pending".
+
+    The policy comes from the Member record and the treating provider from
+    `current_care_plan.managing_provider`, so the claim is consistent with the
+    record it was raised from.
+
+    Args:
+        member_id: Member business key
+        procedure_code: Procedure/service code; must match Plan.treatments[].treatmentCode
+        procedure_desc: Human-readable description of the procedure
+        diagnosis_code: Diagnosis supporting medical necessity; matches treatments[].condition
+        diagnosis_display: Human-readable diagnosis description
+        billed_amt: Total amount billed by the provider
+        claim_type: specialty_pharmacy, pharmacy or medical
+        service_date: Date of service as YYYY-MM-DD. Defaults to today.
+    """
+    if store is None:
+        return _no_store()
+    member = store.get_member(member_id)
+    if not member:
+        return json.dumps({"error": f"No member found: {member_id}"})
+
+    provider = ((member.get("current_care_plan") or {}).get("managing_provider")) or {}
+    if not provider.get("providerId"):
+        return json.dumps(
+            {"error": f"Member {member_id} has no managing provider on the current care plan"}
+        )
+
+    claim = NewClaim(
+        claimId=new_claim_id(),
+        memberId=member["memberId"],
+        policyId=member["policyId"],
+        provider=ClaimProvider(
+            providerId=provider["providerId"],
+            name=provider.get("name", ""),
+            specialty=provider.get("specialty", ""),
+        ),
+        procedureCode=procedure_code.upper(),
+        procedureDesc=procedure_desc,
+        diagnosisCode=diagnosis_code.upper(),
+        diagnosisDisplay=diagnosis_display,
+        serviceDate=service_date or today_iso(),
+        claimType=claim_type,
+        billedAmt=billed_amt,
+    )
+    try:
+        created = store.create_claim(claim)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+    return json.dumps({"status": "created", "claim": created}, indent=2, default=str)
+
+
+@app.tool(is_local=False)
+def update_claim_status(
+    claim_id: str,
+    status: str,
+    paid_amt: float = 0.0,
+    member_owed: float = 0.0,
+    denial_reason: str = "",
+    linked_audit_trace_id: str = "",
+) -> str:
+    """Apply the outcome of an authorization decision to its claim.
+
+    Guardrail: a claim can never be marked approved or paid while its linked
+    audit trace records a denial or is still pending. The claim and the trace
+    must always tell the same story.
+
+    Args:
+        claim_id: Claim business key
+        status: paid, approved, approved_restricted, denied or pending
+        paid_amt: Amount paid by the insurer
+        member_owed: Amount owed by the member
+        denial_reason: Reason for denial, when applicable
+        linked_audit_trace_id: Trace that authorized this claim, if prior auth applied
+    """
+    if store is None:
+        return _no_store()
+    claim = store.get_claim(claim_id)
+    if not claim:
+        return json.dumps({"error": f"No claim found: {claim_id}"})
+
+    trace_id = linked_audit_trace_id or claim.get("linkedAuditTraceId") or ""
+    if status in ("approved", "approved_restricted", "paid") and trace_id:
+        trace = store.get_trace(trace_id)
+        decision = ((trace or {}).get("outcome") or {}).get("decision")
+        if decision in ("denied", "pending") or decision is None:
+            return json.dumps(
+                {
+                    "error": "guardrail_blocked",
+                    "detail": (
+                        f"Cannot set claim {claim_id} to {status!r} while trace {trace_id} "
+                        f"records decision {decision!r}. Resolve the trace first."
+                    ),
+                }
+            )
+
+    updates: dict[str, Any] = {
+        "status": status,
+        "paidAmt": paid_amt,
+        "memberOwed": member_owed,
+        "denialReason": denial_reason or None,
+    }
+    if trace_id:
+        updates["linkedAuditTraceId"] = trace_id
+    updated = store.update_claim(claim_id, updates)
+    return json.dumps({"status": "updated", "claim": updated}, indent=2, default=str)
+
+
+# =============================================================================
+# Audit Log / authorization tools
+# =============================================================================
+
+
+@app.tool(is_local=False)
+def create_audit_trace(
+    subject_ref: str,
+    decision_type: str = "PRIOR_AUTHORIZATION",
+    subject_type: str = "MEMBER",
+    triggered_by: str = "system:pa_agent",
+    guideline_ref: str = "",
+    input_facts: str = "",
+) -> str:
+    """Open a new decision trace at the start of a request.
+
+    Every decision — approval, denial or escalation — must have one. Record the
+    administrative gate results you already have as `input_facts`.
+
+    Args:
+        subject_ref: memberId or claimId this decision concerns
+        decision_type: PRIOR_AUTHORIZATION or CLAIM_ADJUDICATION
+        subject_type: MEMBER or CLAIM
+        triggered_by: System or user that initiated the decision
+        guideline_ref: Clinical Guideline _id used (e.g. "CMG-RA-2026.3")
+        input_facts: Short factual inputs, separated by ";" or newlines
+    """
+    if store is None:
+        return _no_store()
+    trace = store.create_trace(
+        decision_type=decision_type,
+        subject_ref=subject_ref,
+        subject_type=subject_type,
+        triggered_by=triggered_by,
+        guideline_ref=guideline_ref or None,
+        input_facts=_split_list(input_facts),
+    )
+    return json.dumps({"status": "created", "trace": trace}, indent=2, default=str)
+
+
+@app.tool(is_local=False)
+def append_reasoning_step(
+    trace_id: str,
+    memory_type: str,
+    name: str,
+    detail: str,
+    confidence: float,
+    step_input: str = "",
+    step_output: str = "",
+) -> str:
+    """Record one reasoning step on a trace, tagged by memory type.
+
+    `memory_type` is not optional: it is what makes the four-memory-type claim
+    verifiable rather than asserted. `detail` must be a plain-language sentence a
+    human reviewer or auditor can read.
+
+    Args:
+        trace_id: Trace business key
+        memory_type: semantic, taxonomic, episodic or procedural
+        name: Short label for the step
+        detail: Plain-language explanation of the step's reasoning
+        confidence: Step-level confidence, 0-1
+        step_input: What the step consumed (JSON object or short prose)
+        step_output: What the step produced (JSON object or short prose)
+    """
+    if store is None:
+        return _no_store()
+    memory_type = memory_type.strip().lower()
+    if memory_type not in ("semantic", "taxonomic", "episodic", "procedural"):
+        return json.dumps(
+            {
+                "error": "invalid_memory_type",
+                "detail": "memory_type must be semantic, taxonomic, episodic or procedural.",
+            }
+        )
+    trace = store.get_trace(trace_id)
+    if not trace:
+        return json.dumps({"error": f"No trace found: {trace_id}"})
+
+    step = ReasoningStep(
+        stepId=f"STP-{len(trace.get('steps') or []) + 1:03d}",
+        memoryType=cast(Any, memory_type),
+        name=name,
+        input=_as_object(step_input),
+        output=_as_object(step_output),
+        confidence=confidence,
+        detail=detail,
+    )
+    updated = store.append_step(trace_id, step)
+    return json.dumps({"status": "appended", "trace": updated}, indent=2, default=str)
+
+
+@app.tool(is_local=False)
+def recommend_decision(trace_id: str, decision: str, rationale: str, confidence: float) -> str:
+    """Propose an outcome on a trace, without closing the case.
+
+    This tool only ever recommends — it never sets `review.closedBy`. The
+    response tells you which closure path applies: when `requires_escalation` is
+    true you MUST call `escalate_to_human` next, and you may not close the case
+    yourself under any circumstances.
+
+    Args:
+        trace_id: Trace business key
+        decision: approved, approved_restricted, denied or pending
+        rationale: Plain-language summary of the overall decision
+        confidence: Overall decision confidence from compute_decision_confidence
+    """
+    if store is None:
+        return _no_store()
+    decision = decision.strip().lower()
+    if decision not in VALID_DECISIONS:
+        return json.dumps(
+            {"error": "invalid_decision", "detail": f"decision must be one of {VALID_DECISIONS}"}
+        )
+    trace = store.get_trace(trace_id)
+    if not trace:
+        return json.dumps({"error": f"No trace found: {trace_id}"})
+
+    guideline_ref = (trace.get("contextSnapshot") or {}).get("guidelineRef")
+    threshold = _guideline_threshold(store.get_guideline(guideline_ref) if guideline_ref else None)
+    clinical = _has_clinical_reasoning(trace)
+
+    # Bounded authority, evaluated from the trace itself rather than from the
+    # agent's own judgement about what it is allowed to do.
+    if decision == "denied" and clinical:
+        escalation_reason: Optional[str] = ESCALATION_REASON_CLINICAL_DENIAL
+    elif decision == "pending" or confidence < threshold:
+        escalation_reason = ESCALATION_REASON_LOW_CONFIDENCE
+    else:
+        escalation_reason = None
+
+    updated = store.set_outcome(trace_id, decision, rationale, confidence)
+    return json.dumps(
+        {
+            "status": "recommended",
+            "traceId": trace_id,
+            "outcome": (updated or {}).get("outcome"),
+            "confidenceThreshold": threshold,
+            "clinicalReasoningPresent": clinical,
+            "requiresEscalation": escalation_reason is not None,
+            "escalationReason": escalation_reason,
+            "nextAction": (
+                f"escalate_to_human(reason='{escalation_reason}')"
+                if escalation_reason
+                else "close_administrative_determination"
+            ),
+        },
+        indent=2,
+        default=str,
+    )
 
 
 @app.tool(is_local=True)
-def human_review(
-    claim_id: str,
-    decision: str,
+def escalate_to_human(
+    trace_id: str,
     reason: str,
-    claim_amount: float,
-    risk_level: str,
-    conversation_summary: str,
-    policy_number: str = "",
-    customer_name: str = "",
+    case_brief: str,
+    final_decision_maker: str = "medical_director",
 ) -> str:
-    """Request human review for high-risk or high-value claim decisions.
+    """Route a case to a medical director and SUSPEND execution until they respond.
 
-    This tool SUSPENDS execution until a human provides input.
-    Use this when the claim requires manual approval due to:
-    - High claim amount ($5,000+)
-    - High or medium risk assessment
-    - Unusual claim patterns
+    Must be called — not optionally — whenever `recommend_decision` reports
+    `requiresEscalation: true`, i.e. on any clinical denial recommendation and on
+    any decision whose confidence is below the guideline threshold.
+
+    When the review resumes with a decision, call `close_by_medical_director`
+    with the reviewer's identity, then `update_claim_status`, then
+    `update_member_summary`.
 
     Args:
-        claim_id: The claim ID requiring review
-        decision: The preliminary decision (approve, deny, adjust)
-        reason: Reason for requesting human review
-        claim_amount: The claim amount in dollars
-        risk_level: Risk level from analysis (low, medium, high)
-        conversation_summary: Summary of the conversation leading to this review request.
-            Include: what the customer reported, relevant policy details, and why review is needed.
-        policy_number: The policy number associated with the claim (if known)
-        customer_name: The customer's name (if known)
+        trace_id: Trace business key
+        reason: Why review is required, e.g. "clinical_denial_requires_physician_closure"
+        case_brief: Full brief for the reviewer — member, requested treatment,
+            eligibility and coverage findings, the criteria applied, what the
+            documented trial shows, and the recommendation with its confidence
+        final_decision_maker: Role responsible for closing the case
     """
-    # Create a review task
-    task_id = f"REVIEW-{uuid.uuid4().hex[:8].upper()}"
+    if store is None:
+        return _no_store()
+    trace = store.get_trace(trace_id)
+    if not trace:
+        return json.dumps({"error": f"No trace found: {trace_id}"})
 
-    # Update claim status to suspended
-    claim_store.update_claim(claim_id, {"status": "suspended_for_review"})
+    store.set_escalation(trace_id, reason, final_decision_maker)
+    outcome = trace.get("outcome") or {}
 
     return SuspendPayload(
         suspend_reason="awaiting_human_review",
         suspend_context={
-            "task_id": task_id,
-            "claim_id": claim_id,
-            "policy_number": policy_number,
-            "customer_name": customer_name,
-            "decision": decision,
+            "task_id": f"REVIEW-{uuid.uuid4().hex[:8].upper()}",
+            "trace_id": trace_id,
+            "subject_ref": trace.get("subjectRef"),
+            "decision_type": trace.get("decisionType"),
+            "recommended_decision": outcome.get("decision"),
+            "confidence": outcome.get("confidence"),
             "reason": reason,
-            "claim_amount": claim_amount,
-            "risk_level": risk_level,
-            "conversation_summary": conversation_summary,
+            "final_decision_maker": final_decision_maker,
+            "case_brief": case_brief,
+            "guideline_ref": (trace.get("contextSnapshot") or {}).get("guidelineRef"),
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "instructions": "Please review the claim and provide approval or denial decision.",
+            "instructions": (
+                "Review the brief and close the case with a final determination. "
+                "The agent cannot close a clinical denial."
+            ),
         },
     ).to_json()
 
 
-@app.tool(is_local=True, redact_fields=["recipient_email"])
-def send_notification(
-    recipient_email: str,
-    subject: str,
-    body: str,
-    notification_type: str = "email",
+@app.tool(is_local=False)
+def close_administrative_determination(
+    trace_id: str,
+    reason: str,
+    closed_by: str = "system:pa_agent",
 ) -> str:
-    """Send notification to customer about claim resolution or policy updates.
+    """Close a case as the agent — only for determinations the agent may own.
 
-    Use this after a claim has been resolved to notify the customer of the outcome.
+    Permitted reasons:
+    - "eligibility_lapsed": the policy was not active on the date of service
+    - "benefit_exclusion": the plan does not cover the treatment or its tier
+    - "clinical_approval_within_threshold": an approval whose confidence met the
+      guideline's threshold
 
-    Args:
-        recipient_email: Customer's email address
-        subject: Email subject line
-        body: Email body content
-        notification_type: Type of notification (email, sms). Default: email
-
-    Note: The recipient_email is redacted in execution logs for privacy.
-    """
-    notification_id = f"NOTIF-{uuid.uuid4().hex[:8].upper()}"
-
-    return json.dumps(
-        {
-            "notification_id": notification_id,
-            "status": "sent",
-            "recipient": recipient_email,
-            "type": notification_type,
-            "subject": subject,
-            "sent_at": datetime.now(timezone.utc).isoformat(),
-            "message": "Notification sent successfully.",
-        },
-        indent=2,
-    )
-
-
-@app.tool(is_local=False)
-def check_claim_status(claim_id: str) -> str:
-    """Check the current status of an insurance claim.
+    Hard guardrail: this tool refuses to close a denial that was reached through
+    clinical reasoning (any episodic or procedural step on the trace), and
+    refuses any trace already routed to a human. That refusal is the literal
+    implementation of bounded authority — the agent assembles the case, but it is
+    never the final word on a clinical denial.
 
     Args:
-        claim_id: The claim ID to check (e.g., "CLM-123456")
-
-    Returns:
-        Current claim status, risk assessment, and timeline information.
+        trace_id: Trace business key
+        reason: One of the permitted reasons above
+        closed_by: System identity closing the case
     """
-    claim = claim_store.get_claim(claim_id)
-    if not claim:
-        return json.dumps({"error": f"Claim not found: {claim_id}"})
-
-    # Build response with relevant information
-    response = {
-        "claim_id": claim.get("claim_id"),
-        "status": claim.get("status"),
-        "claim_type": claim.get("claim_type"),
-        "claim_amount": claim.get("claim_amount"),
-        "description": claim.get("description"),
-        "created_at": claim.get("created_at"),
-        "updated_at": claim.get("updated_at"),
-    }
-
-    # Include risk assessment if available
-    if claim.get("risk_assessment"):
-        response["risk_assessment"] = {
-            "level": claim.get("risk_assessment"),
-            "confidence": claim.get("risk_confidence"),
-            "recommendation": claim.get("recommendation"),
-        }
-
-    # Include resolution if available
-    if claim.get("resolution"):
-        response["resolution"] = {
-            "decision": claim.get("resolution"),
-            "reviewer_notes": claim.get("reviewer_notes"),
-            "resolved_at": claim.get("resolved_at"),
-        }
-
-    return json.dumps(response, indent=2)
-
-
-@app.tool(is_local=False)
-def list_customer_claims() -> str:
-    """List all insurance claims for the current customer.
-
-    Returns all claims filed by the current user across all their policies.
-    """
-    user_id = app.get_current_user_id()
-    claims = claim_store.list_by_user_id(user_id)  # type: ignore[arg-type]  # user_id is str at runtime
-
-    if claims:
+    if store is None:
+        return _no_store()
+    reason = reason.strip().lower()
+    if reason not in AGENT_CLOSABLE_REASONS:
         return json.dumps(
             {
-                "count": len(claims),
-                "claims": claims,
-            },
-            indent=2,
-        )
-    return json.dumps({"count": 0, "message": "No claims found for this customer"})
-
-
-@app.tool(is_local=False)
-def resolve_claim(
-    claim_id: str,
-    resolution: str,
-    reviewer_notes: str = "",
-) -> str:
-    """Resolve a claim after human review or auto-approval.
-
-    Use this after receiving human review decision or when auto-approving a low-risk claim.
-
-    Args:
-        claim_id: The claim ID to resolve
-        resolution: The resolution decision (approved, denied, approved_with_adjustment)
-        reviewer_notes: Notes from the reviewer (optional)
-    """
-    claim = claim_store.get_claim(claim_id)
-    if not claim:
-        return json.dumps({"error": f"Claim not found: {claim_id}"})
-
-    # Resolve the claim
-    resolved = claim_store.resolve_claim(claim_id, resolution, reviewer_notes)
-
-    if resolved:
-        return json.dumps(
-            {
-                "status": "resolved",
-                "claim_id": claim_id,
-                "resolution": resolution,
-                "resolved_at": resolved.get("resolved_at"),
-                "message": f"Claim {claim_id} has been {resolution}.",
-            },
-            indent=2,
-        )
-
-    return json.dumps({"error": "Failed to resolve claim"})
-
-
-# =============================================================================
-# Memory Tools - Using semantic memory for customer profiles
-# =============================================================================
-
-
-@app.tool(is_local=False)
-def save_customer_info(info_key: str, info_value: str) -> str:
-    """Save customer information to memory for future conversations.
-
-    Use when customer provides personal details, preferences, or any important information.
-    Each piece of information is saved with a unique key, allowing multiple facts per customer.
-
-    Args:
-        info_key: Key identifying what information this is (e.g., "name", "email", "phone",
-                  "vehicle_preference", "coverage_preference", "budget", "driving_history")
-        info_value: The actual information to save
-
-    Examples:
-        - save_customer_info("name", "John Smith")
-        - save_customer_info("email", "john@example.com")
-        - save_customer_info("vehicle_preference", "Prefers SUVs, interested in Toyota RAV4")
-        - save_customer_info("coverage_preference", "Wants comprehensive with low deductible")
-        - save_customer_info("budget", "Monthly budget around $150-200")
-    """
-    user_id = app.get_current_user_id()
-
-    # Build descriptive text for semantic search
-    profile_text = f"Customer {info_key}: {info_value}"
-
-    result = app.memory.save_semantic(
-        text=profile_text,
-        label=f"{user_id}_{info_key}",
-        source="agent_health_insurance_coordination",
-        metadata={
-            "type": "customer_info",
-            "info_key": info_key,
-        },
-        user_id=user_id,
-    )
-
-    if result.acknowledged:
-        return json.dumps({"status": "saved", "info_key": info_key, "user_id": user_id})
-    return json.dumps({"status": "error", "error": "Memory not enabled"})
-
-
-@app.tool(is_local=False)
-def recall_customer_info() -> str:
-    """Recall stored information about the current customer.
-
-    Returns all known information from the customer's profile and past interactions.
-    """
-    user_id = app.get_current_user_id()
-
-    context = app.memory.build_context(
-        query=f"customer profile and information for user {user_id}",
-        user_id=user_id,
-    )
-    memory_context = context.formatted_context if isinstance(context.formatted_context, str) else ""
-
-    if not memory_context:
-        return json.dumps(
-            {
-                "user_id": user_id,
-                "found": False,
-                "message": "No stored information found for this customer.",
+                "error": "guardrail_blocked",
+                "detail": f"reason must be one of {AGENT_CLOSABLE_REASONS}.",
             }
         )
+    trace = store.get_trace(trace_id)
+    if not trace:
+        return json.dumps({"error": f"No trace found: {trace_id}"})
 
-    return json.dumps(
-        {
-            "user_id": user_id,
-            "found": True,
-            "profile": memory_context,
-        }
-    )
-
-
-# =============================================================================
-# Episodic Memory Tools - Conversation summaries and events
-# =============================================================================
-
-
-@app.tool(is_local=False)
-def save_conversation_summary(
-    title: str,
-    summary: str,
-    tags: str = "",
-) -> str:
-    """Save a summary of the current conversation for future reference.
-
-    Use this at the end of significant interactions to help remember:
-    - What was discussed (quotes, policy purchases, questions)
-    - Key decisions made
-    - Follow-up items
-
-    This helps provide personalized service in future conversations.
-
-    Args:
-        title: Brief title for this conversation (e.g., "John Smith purchased auto policy")
-        summary: Summary of what was discussed and any outcomes
-        tags: Comma-separated tags for categorization (e.g., "quote,auto_insurance,new_customer")
-    """
-    from agentic_platform_memory.errors import MemoryIdentityError
-
-    user_id = app.get_current_user_id()
-    session_id = get_current_session_id()
-
-    # Parse tags
-    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
-
-    # Use episodic memory for conversation summaries
-    try:
-        episode = app.memory.save_episode(
-            title=title,
-            content=summary,
-            summary=summary,
-            participants=["Customer", "Alex (AI Assistant)"],
-            tags=tag_list,
-            user_id=user_id,
-            session_id=session_id,
-            visibility="private",
-        )
-    except MemoryIdentityError:
+    outcome = trace.get("outcome") or {}
+    decision = outcome.get("decision")
+    if not decision:
         return json.dumps(
             {
-                "status": "error",
-                "message": (
-                    "Cannot save conversation summary without a resolved user_id and session_id."
+                "error": "no_recommendation",
+                "detail": "Call recommend_decision before closing a case.",
+            }
+        )
+    if (trace.get("audit") or {}).get("reviewRequired") or (trace.get("review") or {}).get(
+        "routedToHuman"
+    ):
+        return json.dumps(
+            {
+                "error": "guardrail_blocked",
+                "detail": (
+                    f"Trace {trace_id} is routed to {(trace.get('review') or {}).get('finalDecisionMaker')}. "
+                    "Only that reviewer may close it, via close_by_medical_director."
                 ),
             }
         )
 
-    if episode.acknowledged:
-        return json.dumps(
-            {
-                "status": "saved",
-                "episode_id": episode.id,
-                "title": title,
-                "tags": tag_list,
-                "message": "Conversation summary saved for future reference.",
-            },
-            indent=2,
-        )
-
-    return json.dumps(
-        {
-            "status": "error",
-            "message": "Failed to save conversation summary. Memory may not be enabled.",
-        }
-    )
-
-
-@app.tool(is_local=False)
-def recall_past_conversations(query: str = "") -> str:
-    """Recall past conversations and interactions with the customer.
-
-    Use this to find:
-    - Previous discussions about quotes or policies
-    - Past questions they've asked
-    - Any follow-up items from earlier conversations
-
-    Args:
-        query: Optional search query to find specific conversations
-               (e.g., "policy purchase" or "teenage driver")
-    """
-    user_id = app.get_current_user_id()
-
-    search_query = query if query else f"customer interactions for {user_id}"
-
-    episodes = app.memory.search_episodes(
-        query=search_query,
-        user_id=user_id,
-        top_k=5,
-    )
-
-    if not episodes:
-        return json.dumps(
-            {
-                "found": False,
-                "user_id": user_id,
-                "message": "No past conversations found for this customer.",
-            }
-        )
-
-    # Format episodes for display
-    formatted = []
-    for ep in episodes:
-        ep_meta = ep.metadata or {}
-        formatted.append(
-            {
-                "title": ep_meta.get("title", ""),
-                "summary": ep_meta.get("summary", ep.content[:200]),
-                "tags": ep_meta.get("tags", []),
-            }
-        )
-
-    return json.dumps(
-        {
-            "found": True,
-            "user_id": user_id,
-            "count": len(formatted),
-            "conversations": formatted,
-        },
-        indent=2,
-    )
-
-
-# =============================================================================
-# Taxonomic Memory Tools - Domain terminology lookup
-# =============================================================================
-
-
-@app.tool(is_local=False)
-def explain_insurance_term(term: str) -> str:
-    """Look up and explain an insurance term using the knowledge base.
-
-    Use this when a customer asks about insurance terminology like:
-    - "What is a deductible?"
-    - "What does comprehensive coverage include?"
-    - "What's the difference between liability and collision?"
-
-    Args:
-        term: The insurance term to explain (e.g., "deductible", "comprehensive", "premium")
-    """
-    results = app.memory.search_taxonomic(
-        query=term,
-        top_k=3,
-    )
-
-    if not results:
-        return json.dumps(
-            {
-                "found": False,
-                "term": term,
-                "message": f"No definition found for '{term}'. Please ask the customer to clarify.",
-            }
-        )
-
-    # Find the best match
-    best_match = results[0]
-    best_match_meta = best_match.metadata or {}
-
-    response = {
-        "found": True,
-        "term": best_match_meta.get("term", term),
-        "domain": best_match_meta.get("domain", "insurance"),
-        "definition": best_match_meta.get("definition", ""),
-        "related_terms": best_match_meta.get("related_terms", []),
-    }
-
-    # Include other matches if they're relevant
-    if len(results) > 1:
-        response["related_concepts"] = [
-            {
-                "term": (r.metadata or {}).get("term", ""),
-                "domain": (r.metadata or {}).get("domain", ""),
-                "definition": (r.metadata or {}).get("definition", "")[:100] + "...",
-            }
-            for r in results[1:3]
-        ]
-
-    return json.dumps(response, indent=2)
-
-
-@app.tool(is_local=False)
-def get_coverage_options() -> str:
-    """Get information about available coverage levels and their differences.
-
-    Use this to explain coverage options to customers when they're choosing
-    between Basic, Standard, and Comprehensive coverage.
-    """
-    coverage_terms = ["basic coverage", "standard coverage", "comprehensive coverage"]
-    coverages = []
-
-    for term in coverage_terms:
-        results = app.memory.search_taxonomic(query=term, domain="coverage_types", top_k=1)
-        if results:
-            top_meta = results[0].metadata or {}
-            coverages.append(
+    if reason == "clinical_approval_within_threshold":
+        if decision not in ("approved", "approved_restricted"):
+            return json.dumps(
                 {
-                    "level": top_meta.get("term", term),
-                    "description": top_meta.get("definition", ""),
-                    "related": top_meta.get("related_terms", []),
+                    "error": "guardrail_blocked",
+                    "detail": f"Decision is {decision!r}; this reason only closes approvals.",
                 }
             )
-
-    if not coverages:
-        # Fallback to hardcoded info if taxonomic memory not populated
+        guideline_ref = (trace.get("contextSnapshot") or {}).get("guidelineRef")
+        threshold = _guideline_threshold(
+            store.get_guideline(guideline_ref) if guideline_ref else None
+        )
+        if float(outcome.get("confidence") or 0) < threshold:
+            return json.dumps(
+                {
+                    "error": "guardrail_blocked",
+                    "detail": (
+                        f"Confidence {outcome.get('confidence')} is below the guideline threshold "
+                        f"{threshold}. Escalate to a medical director instead."
+                    ),
+                }
+            )
+    elif decision == "denied" and _has_clinical_reasoning(trace):
         return json.dumps(
             {
-                "source": "default",
-                "coverages": [
-                    {"level": "Basic", "description": "Liability only - covers damages to others"},
-                    {
-                        "level": "Standard",
-                        "description": "Collision + Liability - covers your car in accidents",
-                    },
-                    {
-                        "level": "Comprehensive",
-                        "description": "Full coverage including theft, weather, vandalism",
-                    },
-                ],
-            },
-            indent=2,
+                "error": "guardrail_blocked",
+                "detail": (
+                    "This denial was reached through clinical reasoning (episodic/procedural "
+                    "steps are on the trace), so it is not an administrative determination. "
+                    "Call escalate_to_human — only a medical director may close a clinical denial."
+                ),
+            }
         )
 
+    if not closed_by.startswith("system:"):
+        return json.dumps(
+            {
+                "error": "guardrail_blocked",
+                "detail": "closed_by must be a system identity, e.g. 'system:pa_agent'.",
+            }
+        )
+
+    closed = store.close_trace(
+        trace_id,
+        closed_by=closed_by,
+        final_decision_maker="agent",
+        regulatory_flag=reason if reason != "clinical_approval_within_threshold" else None,
+    )
     return json.dumps(
         {
-            "source": "knowledge_base",
-            "coverages": coverages,
+            "status": "closed",
+            "traceId": trace_id,
+            "reason": reason,
+            "decision": decision,
+            "review": (closed or {}).get("review"),
+            "nextAction": "update_claim_status, then update_member_summary",
         },
         indent=2,
+        default=str,
     )
+
+
+@app.tool(is_local=False)
+def close_by_medical_director(
+    trace_id: str,
+    closed_by: str,
+    final_decision: str,
+    override_flag: bool = False,
+    override_reason: str = "",
+) -> str:
+    """Record a medical director's final determination on an escalated case.
+
+    Call this only after `escalate_to_human` has resumed with a human decision,
+    passing that human's identity — the agent may never supply a system identity
+    here, and may never invent a determination the reviewer did not give.
+
+    Args:
+        trace_id: Trace business key
+        closed_by: The reviewer's name or ID (e.g. "Dr. R. Sandoval")
+        final_decision: approved, approved_restricted, denied or pending
+        override_flag: True when the human overrode the recommendation
+        override_reason: Why the recommendation was overridden
+    """
+    if store is None:
+        return _no_store()
+    final_decision = final_decision.strip().lower()
+    if final_decision not in VALID_DECISIONS:
+        return json.dumps(
+            {"error": "invalid_decision", "detail": f"decision must be one of {VALID_DECISIONS}"}
+        )
+    if not closed_by or closed_by.startswith("system:") or closed_by.strip().lower() == "agent":
+        return json.dumps(
+            {
+                "error": "guardrail_blocked",
+                "detail": "closed_by must identify the human reviewer, not a system identity.",
+            }
+        )
+    trace = store.get_trace(trace_id)
+    if not trace:
+        return json.dumps({"error": f"No trace found: {trace_id}"})
+    if not (trace.get("review") or {}).get("routedToHuman"):
+        return json.dumps(
+            {
+                "error": "guardrail_blocked",
+                "detail": (
+                    f"Trace {trace_id} was never escalated. Call escalate_to_human first, or "
+                    "close it with close_administrative_determination if the agent may own it."
+                ),
+            }
+        )
+
+    recommended = (trace.get("outcome") or {}).get("decision")
+    override = {
+        "overrideFlag": bool(override_flag or final_decision != recommended),
+        "overrideBy": closed_by,
+        "overrideReason": override_reason or None,
+        "decision": final_decision,
+    }
+    closed = store.close_trace(
+        trace_id,
+        closed_by=closed_by,
+        final_decision_maker=(trace.get("review") or {}).get("finalDecisionMaker")
+        or "medical_director",
+        override=override,
+    )
+    return json.dumps(
+        {
+            "status": "closed",
+            "traceId": trace_id,
+            "recommendedDecision": recommended,
+            "finalDecision": final_decision,
+            "outcome": (closed or {}).get("outcome"),
+            "review": (closed or {}).get("review"),
+            "nextAction": "update_claim_status, then update_member_summary, then notify_member",
+        },
+        indent=2,
+        default=str,
+    )
+
+
+@app.tool(is_local=False)
+def get_audit_trail(subject_ref: str = "", claim_id: str = "") -> str:
+    """Reconstruct the complete reasoning history for a member or a claim.
+
+    Read-only regulatory retrieval: returns every trace in full, unedited,
+    ordered by creation time, including linkedTraces[] chains. This is the tool a
+    regulator-facing report calls.
+
+    Args:
+        subject_ref: memberId (or claimId) whose traces to retrieve
+        claim_id: Claim business key, to follow linkedAuditTraceId to its trace
+    """
+    if store is None:
+        return _no_store()
+    if claim_id:
+        traces = store.list_traces_by_claim(claim_id)
+    elif subject_ref:
+        traces = store.list_traces(subject_ref)
+    else:
+        return json.dumps({"error": "Provide either subject_ref or claim_id"})
+    return json.dumps({"count": len(traces), "traces": traces}, indent=2, default=str)
+
+
+@app.tool(is_local=True, redact_fields=["message"])
+def notify_member(member_id: str, message: str, status: str, trace_id: str = "") -> str:
+    """Notify a member about the outcome or progress of an authorization.
+
+    Write the message in plain language, addressed to the member. Note: the
+    message body is redacted in execution logs because it can carry PHI.
+
+    Args:
+        member_id: Member business key
+        message: Member-facing message
+        status: Decision status the message concerns
+        trace_id: Trace this notification relates to
+    """
+    if store is None:
+        return _no_store()
+    notification = store.create_notification(member_id, message, status, trace_id or None)
+    # `delivery` rather than `status`: the notification carries its own `status`,
+    # which is the decision it concerns, not whether it was sent.
+    return json.dumps({"delivery": "sent", "notification": notification}, indent=2, default=str)
 
 
 # =============================================================================
@@ -1042,15 +1311,15 @@ class _AgentStateOptional(TypedDict, total=False):
 
     user_id: Optional[str]
     session_id: Optional[str]  # Thread/session ID for conversation tracking
-    memory_context: Optional[str]
-    # Claim-related fields
+    # Prior-authorization case fields
+    member_id: Optional[str]
+    policy_id: Optional[str]
     claim_id: Optional[str]
-    policy_number: Optional[str]
-    claim_amount: Optional[float]
+    trace_id: Optional[str]
 
 
 class AgentState(_AgentStateOptional):
-    """State for the insurance agent workflow.
+    """State for the prior-authorization workflow.
 
     Uses inheritance to make optional fields truly optional (not required keys),
     while messages remains required. This allows LangGraph's partial state updates
@@ -1060,174 +1329,117 @@ class AgentState(_AgentStateOptional):
     messages: Annotated[list[BaseMessage], add_messages]
 
 
-SYSTEM_PROMPT = """You are Alex, an AI insurance assistant for SecureLife Insurance, specializing in auto insurance.
+SYSTEM_PROMPT = """You are the prior-authorization agent for a health insurer.
 
 ## Your Role
-Help customers with their complete insurance journey:
-- Get personalized auto insurance quotes and purchase policies
-- File and track insurance claims
-- Resolve disputes with human-in-the-loop review when needed
+You assemble and decide prior-authorization cases for members: you read the
+member's record as it already stands, apply the plan's benefits and the clinical
+guideline's criteria, and leave a complete, regulator-ready reasoning trace.
+
+You work for the member and the reviewer at once: be quick and decisive where the
+facts are mechanical, and careful where clinical judgement is involved.
 
 ## Response Rules
-- You MUST always end every conversational turn with a natural-language response to the user.
-- Tool call results are NOT visible to the user — the user cannot see tool inputs or outputs. After any tool call completes, you MUST summarize or present the results in your own words.
-- Never end a turn with only a tool call and no follow-up text. If you do, the user will see a blank message.
+- You MUST always end every conversational turn with a natural-language response.
+- Tool results are NOT visible to the user — after any tool call, summarize the
+  result in your own words. Never end a turn with only a tool call.
+- Name the member, the treatment, the decision and the reason in plain language.
+  Never quote confidence scores at a member without explaining what they mean.
 
-## Capabilities
+## The Data Model You Work With
+- **Member** is the single, continuously-updated record: eligibility, diagnoses,
+  medications, `treatment_responses[]` (the member's own trial history), clinical
+  notes, and the current care plan. Read it as-is. Never reconstruct it.
+- **Policy** (`Member.policyId` -> `policyNumber`) is the contract; it references
+  exactly one **Plan** (`Policy.planId`).
+- **Plan** carries `treatments[]`, each with `steps[]` — a treatment is a
+  sequence of stages, and a plan can cover some stages but not others.
+- **Claim** bridges the health event and the insurance outcome.
+- **Audit Log** is the decision trace: memory-tagged reasoning steps, outcome,
+  and review closure.
+- **Clinical Guideline** is versioned reference data: drug classification and
+  step-therapy criteria, plus the `confidence_threshold` for auto-resolution.
 
-### Policy Management
-- Generate personalized auto insurance quotes based on vehicle and driver information
-- Create new insurance policies for customers
-- Look up existing policies by policy number
-- List all policies for the current customer
+## The Four Memory Types
+Every reasoning step you record must declare which memory type it represents:
+- `semantic` — the requested drug and the member's on-file diagnosis are the same
+  clinical concept (`normalize_clinical_concept`)
+- `taxonomic` — where the drug sits in the class/tier structure
+  (`classify_treatment`)
+- `episodic` — the member's own trial history, and comparable past cases
+  (`review_treatment_response_history`, `get_comparable_cases`)
+- `procedural` — the encoded criteria and gates applied at runtime
+  (`evaluate_step_therapy`)
 
-### Claims Processing
-- File insurance claims for incidents (collision, theft, comprehensive, glass, vandalism)
-- Analyze claim risk to determine approval path
-- Request human review for high-risk or high-value claims
-- Send notifications about claim resolutions
-- Track claim status throughout the process
+## Workflow — follow this order
+1. `get_member_profile(member_id)` — always first. Note the considered therapy,
+   the active diagnoses, and the documented trial history.
+2. `get_policy_by_member(member_id)`.
+3. `verify_eligibility_on_date(policy_id, service_date)` — **administrative gate**.
+4. `get_plan_by_policy(plan_id)`.
+5. `check_treatment_coverage(plan_id, treatment_code, condition, drug)` —
+   **administrative gate**.
+6. `get_applicable_guideline(condition)` — gives you the `guidelineRef` and the
+   `confidence_threshold`.
+7. `create_audit_trace(subject_ref=member_id, guideline_ref=..., input_facts=...)`.
+8. Clinical reasoning, appending a step after each with
+   `append_reasoning_step`: `normalize_clinical_concept` (semantic),
+   `classify_treatment` (taxonomic), `review_treatment_response_history` and
+   `get_comparable_cases` (episodic), `evaluate_step_therapy` (procedural).
+9. `compute_decision_confidence(step_confidences, criteria_satisfied)`.
+10. `recommend_decision(trace_id, decision, rationale, confidence)`.
+11. Close the case by the path the recommendation tells you (see below).
+12. `update_claim_status`, then `update_member_summary`, then `notify_member`.
 
-### Customer Service
-- Remember customer details and conversation history for personalized service
-- Explain insurance terminology and coverage options using the knowledge base
+### The gates are independent and they short-circuit
+- If `verify_eligibility_on_date` returns `eligible: false` → STOP. Open the
+  trace, record the eligibility gate as a step, recommend `denied`, and close it
+  yourself with `close_administrative_determination(reason="eligibility_lapsed")`.
+  Do NOT run any clinical reasoning.
+- If `check_treatment_coverage` returns `covered: false` → STOP. Open the trace,
+  record the semantic and taxonomic steps if useful, recommend `denied`, and close
+  it yourself with `close_administrative_determination(reason="benefit_exclusion")`.
+  Do NOT run episodic or procedural reasoning.
+- A shorter trace on an administrative determination is CORRECT, not missing
+  data: a factual gate decided the case before clinical judgement was relevant.
+- If `check_treatment_coverage` returns `restriction: "partial"`, the decision is
+  `approved_restricted`, never a plain approval. Tell the member which stages are
+  covered and that they carry the cost of the rest.
 
-## Workflow
+## Bounded Authority — the rule you may never bend
+| Situation | Who closes it |
+|---|---|
+| Eligibility lapsed | You, `close_administrative_determination` |
+| Treatment/tier not covered | You, `close_administrative_determination` |
+| Approval with confidence >= guideline threshold | You, `close_administrative_determination(reason="clinical_approval_within_threshold")` |
+| **Any clinical denial recommendation** | **Medical director only** |
+| Confidence below threshold, in either direction | **Medical director only** |
 
-### CRITICAL: First Contact Protocol
-When a customer first says they want to buy insurance:
-1. **ALWAYS ask for their personal information FIRST**: "To get started, could you please tell me your name, email, and phone number?"
-2. **NEVER ask about their vehicle until you have their personal info**
-3. After they provide their info, THEN ask about vehicle and coverage
+When `recommend_decision` returns `requiresEscalation: true` you MUST call
+`escalate_to_human` immediately, with a `case_brief` complete enough for a
+physician to decide without re-reading the record: the member and requested
+treatment, the eligibility and coverage findings, the criteria applied, what the
+documented trial actually shows, your recommendation and its confidence, and any
+anomaly you found. Then say so plainly to the user — the case is with a medical
+director, and you do not have the authority to deny it yourself.
 
-### For New Customers
-1. **FIRST STEP**: Greet them and ask for name, email, and phone number
-2. Save each piece of information with `save_customer_info`
-3. Ask about their vehicle (year, make, model) and coverage preference
-4. Generate a quote and explain the coverage
-5. If they like the quote, create a policy for them
+After the review resumes, call `close_by_medical_director` with the reviewer's
+own name — never a system identity, and never a determination they did not give.
 
-### For Returning Customers (when memory/policies found)
-1. Recall their info and past conversations
-2. Acknowledge their returning status by name if known
-3. Check existing policies with `list_customer_policies`
-4. Offer loyalty discounts on new quotes
-5. Help with any claims or policy questions
+## Investigate Before You Penalize
+If `review_treatment_response_history` reports an anomaly (a hold, a refill gap):
+- If a clinical note explains it, say so and credit the trial.
+- If nothing explains it, do NOT resolve it in the member's favour and do NOT
+  silently ignore it. It lowers confidence and the case goes to a human.
 
-### For Filing Claims (follow this order exactly)
-1. **CRITICAL FIRST STEP - Find Customer's Policies**: When a customer mentions ANY accident, damage, claim, or incident, your FIRST action MUST be to call `list_customer_policies`
-   - This tool uses the user_id (which persists across sessions) to retrieve ALL policies for this customer
-   - NEVER rely solely on memory context for policy information - ALWAYS verify with the policy store
-   - If policies are found, you'll have the policy number(s), coverage type, vehicle details, and status
-   - If no policies are found, inform the customer they need to purchase a policy first
-   - Example: Customer says "I was in an accident" → IMMEDIATELY call `list_customer_policies` before doing anything else
-2. **Verify Policy Details**: Use `lookup_policy` to get full details of the specific policy if needed
-3. **Gather ALL Claim Details BEFORE Filing**: You MUST have all of these before calling `file_claim`:
-   - Claim type (collision, theft, comprehensive, glass, vandalism)
-   - Estimated claim amount in dollars (this is CRITICAL - never file with $0 or without knowing the amount)
-   - Description of what happened (when, where, what damage occurred)
-   - If the customer hasn't provided any of these, ASK for them first before filing
-4. **File Claim**: Use `file_claim` with the policy number from step 1, claim type, amount, and description
-5. **Analyze Risk**: Use `analyze_claim_risk` to assess the claim. This returns a `risk_assessment` field (low/medium/high).
-6. **Decision Based on Risk Assessment**:
-   - If `risk_assessment` is "low" AND claim amount < $1,000: Auto-approve with `resolve_claim`
-   - If `risk_assessment` is "medium" or "high" OR claim amount >= $5,000: Call `human_review`
-7. **After Human Review Returns**: When `human_review` suspends and then resumes with approval, you MUST call `resolve_claim` with the claim_id and the reviewer's decision before doing anything else.
-8. **After Resolution**: Use `send_notification` to inform the customer of the outcome
-
-## Risk Decision Guidelines
-
-### Auto-Approve (No Human Review Needed)
-- Claims under $1,000 with LOW risk assessment
-- No fraud indicators detected
-- Customer has clean claim history
-
-### Request Human Review
-- Claims $1,000-$5,000 OR MEDIUM risk assessment
-- Claims over $5,000 OR HIGH risk assessment
-- Multiple risk factors present
-- Claim amount exceeds coverage limit
-- Customer has elevated risk score (0.4+)
-- Multiple previous claims on the policy
-
-**CRITICAL: When calling `human_review`, you MUST provide ALL required arguments**:
-1. **claim_id**: The claim ID from the file_claim result
-2. **decision**: Your preliminary decision (approve, deny, adjust)
-3. **reason**: Reason for requesting human review
-4. **claim_amount**: The claim amount in dollars
-5. **risk_level**: REQUIRED - Use the `risk_assessment` value from analyze_claim_risk (low/medium/high)
-6. **conversation_summary**: Comprehensive summary including:
-   - Customer identification (name, policy number if known)
-   - What the customer reported (incident details, when it happened)
-   - Relevant policy details (coverage type, coverage limit, risk score)
-   - Why the claim requires human review (specific risk factors from the risk analysis)
-   - Any concerning patterns or discrepancies noted
-7. **policy_number**: Optional but recommended
-8. **customer_name**: Optional but recommended
-
-Example human_review call:
-- claim_id="CLM-123"
-- decision="approve"
-- reason="High claim amount requires human approval"
-- claim_amount=15000.0
-- risk_level="high" (from analyze_claim_risk result)
-- conversation_summary="Customer John Smith (policy POL-ABC123) reported a collision claim for $15,000 after a rear-end accident on January 15th. Policy is Comprehensive coverage with $50,000 limit and 0.35 risk score. Risk analysis returned HIGH risk with factors: (1) high claim amount exceeds $5,000 threshold, (2) elevated claim amount detected. Customer has 2 previous claims on this policy in the past year."
-- policy_number="POL-ABC123"
-- customer_name="John Smith"
-
-## Important Behaviors
-- Always `recall_customer_info` at the start to check if they're a returning customer
-- Use `recall_past_conversations` to find previous discussions
-- **CRITICAL - Policy Lookup Protocol**: The user_id persists across ALL sessions and conversations. This means:
-  - Policies created in previous sessions are ALWAYS accessible via `list_customer_policies`
-  - When a customer mentions accidents, damage, claims, incidents, or "my car", IMMEDIATELY call `list_customer_policies` as your FIRST action
-  - NEVER rely only on memory context for policy information - memory is supplementary, the policy store is the source of truth
-  - NEVER ask "What's your policy number?" without first calling `list_customer_policies` to check if they have policies
-  - If `list_customer_policies` returns policies, use those policy numbers and details directly
-  - Even in a brand new session/conversation, if the user_id is the same, their policies from previous sessions will be retrieved
-- Example conversation flow:
-  - User: "I was in an accident"
-  - You: [FIRST ACTION: Call `list_customer_policies`] → finds POL-12345
-  - You: "I'm sorry to hear about your accident. I see you have an active Comprehensive policy (POL-12345) for your 2024 Toyota. Can you tell me what happened?"
-- Returning customers get automatic loyalty discounts on quotes
-- When customers ask about insurance terms, use `explain_insurance_term`
-- Use `get_coverage_options` to explain Basic, Standard, and Comprehensive coverage
-- After creating a policy, provide them with their policy number
-- After filing a claim, provide them with their claim ID and next steps
-
-## CRITICAL: Claims Processing Rules
-1. NEVER file a claim until you have ALL required information: claim type, claim amount (in dollars), and description
-   - If a customer reports an accident but doesn't provide an amount, ASK for it first
-   - NEVER file a claim with $0 or a placeholder amount
-2. Call tools ONE AT A TIME in sequence for claims
-3. During a multi-step claims sequence (file → analyze → review/resolve → notify), you may call tools back-to-back without text between intermediate steps
-4. After the FINAL tool in any sequence completes, you MUST provide a natural-language text response summarizing the outcome for the user
-5. Always notify the customer after claim resolution using `send_notification`
-
-## CRITICAL: Save Customer Information
-When a customer provides ANY personal details or preferences, save each piece separately using `save_customer_info`:
-- `save_customer_info("name", "John Smith")`
-- `save_customer_info("email", "john@example.com")`
-- `save_customer_info("phone", "555-123-4567")`
-- `save_customer_info("vehicle_preference", "Interested in insuring a 2022 Toyota Camry SE")`
-- `save_customer_info("coverage_preference", "Wants comprehensive coverage with low deductible")`
-- `save_customer_info("budget", "Looking for coverage around $150/month")`
-- `save_customer_info("driving_history", "Clean record, no accidents in 5 years")`
-
-## CRITICAL: Save Conversation Summaries
-You MUST call `save_conversation_summary` immediately after ANY of these events:
-1. **Policy created** → title="Policy created for [name]", summary="Created [policy_type] policy [policy_number] with [coverage] coverage at [premium]"
-2. **Quote provided** → title="Quote provided to [name]", summary="Provided [coverage] quote for [vehicle] at [premium]/month"
-3. **Claim filed** → title="Claim filed for [name]", summary="Filed [claim_type] claim [claim_id] for $[amount] on policy [policy_number]"
-4. **Claim resolved** → title="Claim resolved for [name]", summary="Claim [claim_id] was [approved/denied]. [brief reason]"
-5. **Customer info saved** → title="New customer [name] registered", summary="Saved profile for [name] ([email])"
-6. **Question answered** → title="Explained [topic] to customer", summary="Customer asked about [topic], explained [key points]"
-
-Example save_conversation_summary calls:
-- After policy: `save_conversation_summary(title="Policy created for John Smith", summary="Created Comprehensive auto policy POL-123456 for 2022 Toyota Camry at $180/month", tags="policy_created,auto_insurance,comprehensive")`
-- After claim: `save_conversation_summary(title="Claim filed for John Smith", summary="Filed collision claim CLM-789012 for $2,500 on policy POL-123456 after rear-end accident", tags="claim_filed,collision,POL-123456")`
-
-Be friendly, professional, and guide customers toward the right coverage and quick claim resolutions.
+## Trace Discipline
+- Every decision gets a trace. Every step declares its `memory_type`.
+- Every `detail` is a plain-language sentence an auditor can read on its own.
+- `recommend_decision` only ever recommends. Only the closure tools close.
+- Never leave `Member.summary` stale — `update_member_summary` runs at the end of
+  every closed decision.
+- Use `get_audit_trail` when asked why a decision was made, or for a compliance
+  or regulator-facing answer.
 """
 
 
@@ -1252,72 +1464,28 @@ def build_agent(llm: Optional[BaseChatModel] = None) -> CompiledStateGraph:
     llm_with_tools = llm.bind_tools(app.get_tool_schemas())
 
     def agent_node(state: AgentState) -> AgentState:
-        from langchain_core.messages import HumanMessage
-
         messages = state["messages"]
         user_id = state.get("user_id", "")
         session_id = state.get("session_id", "")
         logger.info(f"User ID: {user_id}, Session ID: {session_id}")
 
-        # Find the latest user message for memory context query
-        latest_user_query = ""
-        for msg in reversed(messages):
-            if isinstance(msg, HumanMessage):
-                latest_user_query = (
-                    msg.content if isinstance(msg.content, str) else str(msg.content)
-                )
-                break
-
-        # Build memory context.
-        memory_context = ""
-        if user_id and latest_user_query:
-            context = app.memory.build_context(
-                query=latest_user_query,
-                user_id=user_id,
-            )
-            memory_context = (
-                context.formatted_context if isinstance(context.formatted_context, str) else ""
-            )
-            if memory_context:
-                logger.info(f"Built memory context for query: {latest_user_query[:50]}...")
-            else:
-                logger.info("No memory context available")
-
-        # Build system prompt, optionally including memory context and user ID
         system_prompt = SYSTEM_PROMPT
 
-        # Tell the agent the current user's ID so it can use it with memory tools
+        # Today's date decides eligibility on the date of service, so state it
+        # rather than letting the model assume it.
+        system_prompt += f"\n\n## Current Session\nToday's date is {today_iso()}."
         if user_id:
-            system_prompt += f"\n\n## Current Session\nYou are speaking with user_id: {user_id}. Use this ID when calling memory tools."
-
-        if memory_context:
-            system_prompt += f"""
-
-            ## Memory Context
-            {memory_context}
-
-            **IMPORTANT**:
-            The memory context above provides helpful background information about the customer.
-
-            However, for POLICY information (policy numbers, coverage details, active status),
-            you MUST always call `list_customer_policies` to get the current, accurate data from
-            the policy store. Memory context is supplementary - the policy store is the source of truth.
-
-            For other information (customer preferences, past conversations, general background),
-            you can use the memory context directly without calling tools.
-            """
+            system_prompt += f" You are speaking with user_id: {user_id}."
 
         if not messages or not isinstance(messages[0], SystemMessage):
             messages = [SystemMessage(content=system_prompt)] + list(messages)
         else:
-            # Update existing system message if memory context available
             messages = [SystemMessage(content=system_prompt)] + list(messages[1:])
 
         # Invoke the LLM
         response = llm_with_tools.invoke(messages)
 
         # Apply guardrails validation to LLM response (if enabled)
-        # This checks for competitor mentions, PII, and other configured rules
         response = app.validate_llm_response(response)
 
         return {"messages": [response]}
@@ -1334,7 +1502,16 @@ def build_agent(llm: Optional[BaseChatModel] = None) -> CompiledStateGraph:
     builder.add_conditional_edges("agent", should_continue, {"tools": "tools", "end": END})
     builder.add_edge("tools", "agent")
 
-    graph = builder.compile(checkpointer=app.checkpointer())
+    # A checkpointer needs MongoDB. If it is unreachable the agent should still
+    # answer single-turn requests rather than fail to build at all, which would
+    # turn every request into a 500.
+    try:
+        checkpointer = app.checkpointer()
+    except Exception as e:
+        logger.warning(f"Failed to construct checkpointer ({e}) — running without conversation persistence.")
+        checkpointer = None
+
+    graph = builder.compile(checkpointer=checkpointer)
     logger.info("✅ Agent graph compiled")
     return graph
 
@@ -1348,6 +1525,7 @@ def main():
     """Main entry point."""
     logger.info("=" * 60)
     logger.info(f"🚀 Starting {APP_NAME} (Runner SDK)")
+    logger.info(f"   Database: {MONGODB_DATABASE}")
     logger.info("=" * 60)
 
     app.run()

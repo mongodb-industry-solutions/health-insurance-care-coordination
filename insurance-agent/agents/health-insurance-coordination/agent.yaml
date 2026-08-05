@@ -18,7 +18,7 @@ network:
 
 features:
     guardrails: false
-    memory: false
+    memory: true
 # Declare which secrets each workload may access. Platform-required secrets
 # (MONGODB_URI, VOYAGE_API_KEY) are always injected and do not need to be listed.
 
