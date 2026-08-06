@@ -8,19 +8,16 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer = "2026-07-30T07:33:54.2187288Z"
 exclude-newer-span = "P7D"
 
 [[package]]
 name = "agentic-platform-memory"
-version = "0.4.0"
-source = { registry = "/opt/runner-shared/dist" }
+version = "0.6.0"
+source = { git = "https://github.com/10gen/magenta-client-libraries?subdirectory=packages%2Fagentic-platform-memory#9a732e2bd340db2170fc12ab9f17068ccc61ff96" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
-]
-wheels = [
-    { path = "/opt/runner-shared/dist/agentic_platform_memory-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -600,6 +597,7 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "magenta-sdklanggraph" },
     { name = "python-dotenv" },
+    { name = "requests" },
     { name = "runner-shared", extra = ["mongodb", "tracing"] },
 ]
 
@@ -616,9 +614,10 @@ requires-dist = [
     { name = "langchain-anthropic", specifier = ">=1.4.0" },
     { name = "langchain-google-genai", specifier = ">=2.1.0" },
     { name = "langchain-openai", specifier = ">=1.1.12" },
-    { name = "magenta-sdklanggraph" },
+    { name = "magenta-sdklanggraph", git = "https://github.com/10gen/magenta-client-libraries?subdirectory=packages%2Fmagenta-sdklanggraph" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "runner-shared", extras = ["mongodb", "tracing"] },
+    { name = "requests", specifier = ">=2.31.0" },
+    { name = "runner-shared", extras = ["mongodb", "tracing"], git = "https://github.com/10gen/magenta-client-libraries?subdirectory=packages%2Frunner-shared" },
 ]
 
 [package.metadata.requires-dev]
@@ -1056,18 +1055,15 @@ wheels = [
 [[package]]
 name = "magenta-sdk-core"
 version = "0.1.0"
-source = { registry = "/opt/runner-shared/dist" }
+source = { git = "https://github.com/10gen/magenta-client-libraries?subdirectory=packages%2Fsdk-core#9a732e2bd340db2170fc12ab9f17068ccc61ff96" }
 dependencies = [
     { name = "pydantic" },
-]
-wheels = [
-    { path = "/opt/runner-shared/dist/magenta_sdk_core-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "magenta-sdklanggraph"
 version = "0.1.0"
-source = { registry = "/opt/runner-shared/dist" }
+source = { git = "https://github.com/10gen/magenta-client-libraries?subdirectory=packages%2Fmagenta-sdklanggraph#9a732e2bd340db2170fc12ab9f17068ccc61ff96" }
 dependencies = [
     { name = "agentic-platform-memory" },
     { name = "langgraph" },
@@ -1075,9 +1071,6 @@ dependencies = [
     { name = "magenta-sdk-core" },
     { name = "openinference-instrumentation-langchain" },
     { name = "runner-shared", extra = ["mongodb", "tracing"] },
-]
-wheels = [
-    { path = "/opt/runner-shared/dist/magenta_sdklanggraph-0.1.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -2299,7 +2292,7 @@ wheels = [
 [[package]]
 name = "runner-shared"
 version = "0.1.0"
-source = { registry = "/opt/runner-shared/dist" }
+source = { git = "https://github.com/10gen/magenta-client-libraries?subdirectory=packages%2Frunner-shared#9a732e2bd340db2170fc12ab9f17068ccc61ff96" }
 dependencies = [
     { name = "agentic-platform-memory" },
     { name = "fastapi" },
@@ -2316,9 +2309,6 @@ dependencies = [
     { name = "regex" },
     { name = "sentry-sdk" },
     { name = "uvicorn" },
-]
-wheels = [
-    { path = "/opt/runner-shared/dist/runner_shared-0.1.0-py3-none-any.whl" },
 ]
 
 [package.optional-dependencies]

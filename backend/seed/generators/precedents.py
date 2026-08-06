@@ -45,7 +45,7 @@ def _precedent(
     `linkedAuditTraceId` is left null: the biologic these members received did
     require prior authorization, but those historical traces are outside the
     demo's seeded window, and pointing at a trace that does not exist in
-    `decision_traces` would be a dangling reference.
+    `audit_log` would be a dangling reference.
     """
     member_owed = round(billed * _COINSURANCE, 2)
     service_date = adjudicated[:10]

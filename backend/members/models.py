@@ -255,3 +255,45 @@ class ConceptMatchResponse(BaseModel):
     guideline_conditions: List[str] = []
     confidence: float
     detail: str
+
+    
+class PendingAuthorizationMember(BaseModel):
+    """One row of the Insurance Agent's work queue.
+
+    Deliberately narrower than `Member`: a queue view needs identity, the rolling
+    summary and the open actions, not clinical history or encrypted PHI.
+    """
+    member_id: str = Field(alias="memberId")
+    first_name: Optional[str] = Field(default=None, alias="firstName")
+    last_name: Optional[str] = Field(default=None, alias="lastName")
+    policy_id: Optional[str] = Field(default=None, alias="policyId")
+    pending_actions: List[PendingAction] = Field(default=[], alias="pendingActions")
+    summary: Optional[Summary] = None
+
+    class Config:
+        populate_by_name = True
+
+
+class PendingAuthorizationsResponse(BaseModel):
+    count: int
+    members: List[PendingAuthorizationMember]
+
+
+class PendingActionUpdateResponse(BaseModel):
+    member_id: str = Field(alias="memberId")
+    pending_action: PendingAction = Field(alias="pendingAction")
+    updated_at: str = Field(alias="updatedAt")
+
+    class Config:
+        populate_by_name = True
+
+
+class MemberSummaryResponse(BaseModel):
+    member_id: str = Field(alias="memberId")
+    summary: Summary
+    # How many traces the counts were derived from — makes a surprising
+    # open_authorization_count traceable to the data rather than to arithmetic.
+    trace_count: int = Field(alias="traceCount")
+
+    class Config:
+        populate_by_name = True

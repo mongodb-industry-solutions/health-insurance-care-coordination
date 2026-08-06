@@ -9,6 +9,7 @@ dependencies = [
     "runner-shared[mongodb,tracing]",
     "magenta-sdklanggraph",
     "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
     "langchain-google-genai>=2.1.0",
     "grpcio>=1.76.0",
     "grpcio-health-checking>=1.76.0",

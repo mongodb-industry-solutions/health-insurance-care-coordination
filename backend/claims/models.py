@@ -37,10 +37,14 @@ class Claim(BaseModel):
     diagnosis_code: Optional[str] = Field(default=None, alias="diagnosisCode")
     diagnosis_display: Optional[str] = Field(default=None, alias="diagnosisDisplay")
 
-    # Retained retrieval keys (episodic memory / comparable-case matching)
-    service: str
-    diagnosis: str
-    outcome: str
+    # Legacy retrieval keys. The final data model dropped them in favour of the
+    # coded fields above (`procedureDesc`, `diagnosisCode`, `status`), so live
+    # documents do not carry them and all three are optional. Comparable-case
+    # retrieval now matches on the coded fields and maps them back onto this shape
+    # — see `ClaimRepository.find_comparable`.
+    service: Optional[str] = None
+    diagnosis: Optional[str] = None
+    outcome: Optional[str] = None
     presentation_profile: Optional[Dict[str, Any]] = None
 
     service_date: Optional[str] = Field(default=None, alias="serviceDate")
@@ -70,11 +74,16 @@ class ComparableClaim(BaseModel):
 
     Only the fields the agent needs to judge similarity — service, outcome, and
     the presentation_profile — plus ids to cite the precedent.
+
+    `service` and `outcome` are the shape the agent's prompts already read. The
+    repository maps them from the coded fields the final data model actually
+    carries (`procedureDesc` and `status`), so this response shape is stable even
+    though its source fields changed.
     """
     claim_id: str = Field(alias="claimId")
     member_id: Optional[str] = Field(default=None, alias="memberId")
-    service: str
-    outcome: str
+    service: Optional[str] = None
+    outcome: Optional[str] = None
     presentation_profile: Optional[Dict[str, Any]] = None
 
     class Config:
