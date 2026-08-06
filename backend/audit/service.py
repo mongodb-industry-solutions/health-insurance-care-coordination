@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime, timezone
 
 from db.mdb import get_connector
+from shared.summary import compute_summary_fields
 from .repository import AuditRepository
 from members.repository import MemberRepository
 from policies.repository import PolicyRepository
@@ -399,16 +400,29 @@ class AuditService:
         cp["considering_therapy"] = None
 
     def _recompute_summary(self, member: dict) -> None:
-        """Recompute the member's small cross-domain summary from their traces."""
+        """Recompute the member's small cross-domain summary from their traces.
+
+        Derivation is delegated to `shared.summary`, which the Insurance Agent's
+        `POST /api/members/{id}/summary` also uses — these fields are denormalized
+        and have two writers, so a single shared derivation is what keeps the two
+        from drifting.
+
+        The previous implementation counted `t["status"]`, a top-level field the
+        final data model does not define: it existed only on traces this service
+        wrote itself, so a member whose traces came from anywhere else counted zero
+        open authorizations and raised KeyError on `traces[-1]["status"]`. The
+        shared version reads `outcome.decision` and `review.*` instead, and treats
+        an unclosed trace as open — which is what makes an escalated case still
+        count as outstanding.
+
+        Still a whole-document upsert rather than a field-level `$set`, because
+        callers mutate `member` in memory first (see `_mark_approved_therapy`) and
+        rely on this call to persist those edits too.
+        """
         traces = self.repository.find_by_member(member["memberId"])
-        open_count = sum(
-            1 for t in traces if t.get("status") in ("pending", "pending_review")
-        )
-        last_status = traces[-1]["status"] if traces else "none"
         now = _now()
         summary = member.setdefault("summary", {})
-        summary["open_authorization_count"] = open_count
-        summary["last_authorization_status"] = last_status
+        summary.update(compute_summary_fields(traces))
         summary["updated_at"] = now
         member["updatedAt"] = now
         self.member_repo.upsert(member)
