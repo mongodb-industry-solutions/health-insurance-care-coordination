@@ -22,6 +22,6 @@ class Collections:
     CLAIMS = "claims"
     # Decision-trace store (regulator-ready). Prior-authorization decisions are
     # documents here; there is no separate `authorizations` collection.
-    AUDIT_LOG = "decision_traces"
+    AUDIT_LOG = "audit_log"
     GUIDELINES = "guidelines"
     NOTIFICATIONS = "notifications"

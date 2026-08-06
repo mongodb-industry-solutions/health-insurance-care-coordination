@@ -5,7 +5,14 @@ from typing import Union
 
 from db.mdb import MongoDBConnector, get_connector
 from .service import MemberService
-from .models import Member, MemberClinicalContext, MemberList
+from .models import (
+    Member,
+    MemberClinicalContext,
+    MemberList,
+    ConceptMatchResponse,
+    OpenCaseResponse,
+    TrialHistoryResponse,
+)
 
 router = APIRouter(prefix="/api/members", tags=["members"])
 
@@ -33,6 +40,66 @@ async def get_member_clinical_context(
     if not context:
         raise HTTPException(status_code=404, detail=f"Member {member_id} not found")
     return context
+
+
+@router.get("/{member_id}/open-case", response_model=OpenCaseResponse)
+async def get_open_case(
+    member_id: str,
+    service: MemberService = Depends(get_member_service),
+):
+    """The member's open pending action — a downstream agent's entry point.
+
+    The agents in this workflow coordinate through the record rather than by
+    calling each other: one opens the case, another reads it back. Returns the
+    requested therapy and the trace to append reasoning to. Read-only.
+    """
+    result = service.get_open_case(member_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Member {member_id} not found")
+    return result
+
+
+@router.get("/{member_id}/trial-history", response_model=TrialHistoryResponse)
+async def review_trial_history(
+    member_id: str,
+    drug: str,
+    cadence_days: int = 30,
+    gap_factor: float = 1.5,
+    service: MemberService = Depends(get_member_service),
+):
+    """Step 5: review the member's trial of the required therapy.
+
+    Episodic memory. Derives the effective trial duration from pharmacy fills, flags
+    any interruption, and reports whether documentation explains it. An unexplained
+    interruption credits only the longest uninterrupted run and lowers confidence.
+    Read-only — use `/gap-resolution` to persist a conclusion.
+    """
+    result = service.review_trial_history(
+        member_id=member_id, drug=drug, cadence_days=cadence_days, gap_factor=gap_factor
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Member {member_id} not found")
+    return result
+
+
+@router.get("/{member_id}/concept-match", response_model=ConceptMatchResponse)
+async def match_clinical_concept(
+    member_id: str,
+    requested_treatment: str,
+    service: MemberService = Depends(get_member_service),
+):
+    """Step 3: match a requested therapy to a documented condition.
+
+    Semantic memory. The provider names a drug; the record carries ICD-10 codes.
+    Resolves one to the other through the guideline that classifies the drug, and
+    returns a confidence-scored match. Read-only — nothing is written here.
+    """
+    result = service.match_clinical_concept(
+        member_id=member_id, requested_treatment=requested_treatment
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Member {member_id} not found")
+    return result
 
 
 @router.post("/{member_id}/treatment-response", response_model=Member)

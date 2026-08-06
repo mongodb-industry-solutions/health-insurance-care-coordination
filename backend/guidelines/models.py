@@ -31,6 +31,82 @@ class Guideline(BaseModel):
         populate_by_name = True
 
 
+class RecommendationResponse(BaseModel):
+    """Step 7: the aggregated confidence and the proposed decision.
+
+    A recommendation, never a closure. `meets_threshold` reports whether the aggregate
+    clears the guideline's bar; it does not say who is allowed to close the case, which
+    is the separate bounded-authority check in Step 8.
+    """
+    condition: str
+    guideline_ref: str
+    step_confidences: List[float] = []
+    # The arithmetic spelled out, e.g. "min(0.98, 0.97, 0.95, 0.9) = 0.9 - 0.55
+    # (criteria not met) = 0.35". Carried so the trace shows how the number was reached
+    # rather than only the number.
+    aggregation: str
+    weakest_step_confidence: float
+    clinical_failure_penalty_applied: bool
+    confidence: float
+    confidence_threshold: Optional[float] = None
+    meets_threshold: bool
+    criteria_satisfied: bool
+    coverage_restriction: str
+    recommendation: str  # approved | approved_restricted | denied
+    rationale: str
+    detail: str
+
+
+class StepTherapyResponse(BaseModel):
+    """Step 6 (procedural memory): the guideline's step-therapy gate applied.
+
+    `satisfied` is the outcome, but it is an input to the recommendation rather than a
+    decision — a failure here never closes the case on its own.
+    """
+    condition: str
+    guideline_ref: str
+    # Null only when the condition's guideline sets no step-therapy requirement.
+    required_drug: Optional[str] = None
+    required_months: float
+    documented_drug: Optional[str] = None
+    documented_months: float
+    step_therapy_applies: bool
+    # Null when no requirement applies; False means the documented trial is of a
+    # different drug, which fails for a different reason than being too short.
+    drug_matches: Optional[bool] = None
+    satisfied: bool
+    confidence_threshold: Optional[float] = None
+    confidence: float
+    detail: str
+
+
+class ClassificationResponse(BaseModel):
+    """Step 4 (taxonomic memory): the requested treatment placed in its category.
+
+    `inferred` is the field that matters: False means the guideline named this drug,
+    True means only its tier could be derived from the condition. The confidence
+    difference between the two is what carries that distinction downstream.
+    """
+    condition: str
+    guideline_ref: str
+    therapy: str
+    classified: bool
+    inferred: bool
+    # Null when the drug is not enumerated — no reference data names its class, and
+    # guessing one would be inventing taxonomy.
+    treatment_class: Optional[str] = None
+    tier: Optional[str] = None
+    prior_auth_required: bool
+    # The gate Steps 5 and 6 go on to evaluate.
+    step_therapy_applies: bool
+    step_therapy_drug: Optional[str] = None
+    step_therapy_min_months: Optional[int] = None
+    # The bar the aggregate confidence is checked against in Step 8.
+    confidence_threshold: Optional[float] = None
+    confidence: float
+    detail: str
+
+
 class GuidelinesListResponse(BaseModel):
     condition: str
     count: int

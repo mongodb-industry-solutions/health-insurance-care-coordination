@@ -170,3 +170,88 @@ class Member(BaseModel):
 class MemberList(BaseModel):
     count: int
     members: List[Member]
+
+
+class OpenCaseResponse(BaseModel):
+    """The member's open pending action — how an agent handed only a `memberId`
+    discovers what was requested and which trace to write reasoning to.
+
+    Every case-specific field is optional because `has_open_case: false` is a
+    legitimate answer, not an error.
+    """
+    member_id: str
+    has_open_case: bool
+    open_action_count: int
+    action_id: Optional[str] = None
+    type: Optional[str] = None
+    status: Optional[str] = None
+    proposed_treatment: Optional[str] = None
+    # The referring physician's assertion of the drug/diagnosis pairing. Returned
+    # for comparison only — `concept-match` derives the code independently and
+    # must not be handed this value, or the verification becomes circular.
+    related_diagnosis_code: Optional[str] = None
+    raised_by: Optional[str] = None
+    raised_at: Optional[str] = None
+    # Null until the case is actually opened and a trace exists.
+    trace_id: Optional[str] = None
+    detail: str
+
+
+class TrialGap(BaseModel):
+    """One interruption in a drug's fill cadence."""
+    drug: str
+    previous_fill: str
+    next_fill: str
+    gap_days: int
+    approx_missed_fills: int
+
+
+class TrialHistoryResponse(BaseModel):
+    """Step 5 (episodic memory): the member's trial of the required prior therapy,
+    with the duration derived from pharmacy fills rather than taken on trust.
+
+    `effective_trial_months` is the number Step 6 evaluates. It is the full observed
+    span when the trial was continuous or an interruption was explained, and only the
+    longest uninterrupted run when an interruption was not.
+    """
+    member_id: str
+    drug: str
+    # What the record claims, kept alongside the derived figure so a divergence
+    # between the two is visible rather than silently overwritten.
+    documented_months: float
+    fill_count: int
+    first_fill: Optional[str] = None
+    last_fill: Optional[str] = None
+    expected_cadence_days: int
+    observed_span_months: Optional[int] = None
+    longest_continuous_months: Optional[int] = None
+    anomaly_detected: bool
+    gaps: List[TrialGap] = []
+    anomaly_explained: bool
+    explanation: Optional[str] = None
+    # The note_id that explained the gap, for provenance on the trace.
+    related_note: Optional[str] = None
+    effective_trial_months: float
+    confidence: float
+    detail: str
+
+
+class ConceptMatchResponse(BaseModel):
+    """Step 3 (semantic memory): the requested therapy resolved against the
+    member's coded diagnoses, via whichever guideline classifies the drug."""
+    member_id: str
+    requested_treatment: str
+    # The bare therapy name the match was performed on, after stripping any
+    # "biologic therapy - " prefix.
+    therapy: str
+    matched: bool
+    matched_condition: Optional[str] = None
+    matched_display: Optional[str] = None
+    # The guideline that supplied the drug-to-condition mapping — carried so the
+    # caller can stamp `contextSnapshot.guidelineRef` without a second lookup.
+    guideline_ref: Optional[str] = None
+    # Both sides of the intersection, so a miss is explainable rather than opaque.
+    member_diagnosis_codes: List[str] = []
+    guideline_conditions: List[str] = []
+    confidence: float
+    detail: str
