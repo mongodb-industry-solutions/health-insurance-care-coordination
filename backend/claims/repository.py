@@ -17,6 +17,36 @@ class ClaimRepository(Repository):
     def find_by_member(self, member_id):
         return self.find({"memberId": member_id})
 
+    def exists(self, claim_id):
+        """Is this business key already taken?
+
+        Used before minting a new `claimId`. The unique index on `claimId` (see
+        db/indexes.py) is the real guarantee — this is the cheap pre-check that
+        avoids relying on an exception for the common case.
+        """
+        return self.collection.count_documents({"claimId": claim_id}, limit=1) > 0
+
+    def insert_claim(self, document):
+        """Insert a new claim, letting MongoDB assign `_id`.
+
+        Plain `insert`, not the inherited `upsert`: the final data model leaves
+        `_id` as a MongoDB-assigned ObjectId, and `upsert` keys on a caller-supplied
+        `_id` it no longer has. Raises `DuplicateKeyError` if `claimId` collides and
+        the unique index is in place.
+        """
+        return self.insert(document)
+
+    def update_fields(self, claim_id, updates):
+        """Write specific top-level fields on a claim.
+
+        Field-level `$set` rather than a whole-document replace, so an outcome write
+        cannot roll back a concurrent change to an unrelated field. Returns the
+        number of documents modified; 0 means no claim matched.
+        """
+        return self.collection.update_one(
+            {"claimId": claim_id}, {"$set": updates}
+        ).modified_count
+
     def delete_by_member(self, member_id):
         """Remove all claims for a member (used by demo reset)."""
         return self.delete_by({"memberId": member_id})
