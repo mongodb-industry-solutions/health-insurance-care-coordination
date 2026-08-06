@@ -56,6 +56,11 @@ ESCALATION_LOW_CONFIDENCE = "confidence_below_guideline_threshold"
 
 APPROVAL_DECISIONS = ("approved", "approved_restricted")
 
+# Outcomes a recommendation may propose. `pending` is included because "we could
+# not settle this" is a legitimate recommendation — one that routes to a human —
+# and forcing a reasoner to pick a direction it does not hold would be worse.
+RECOMMENDABLE_DECISIONS = ("approved", "approved_restricted", "denied", "pending")
+
 _ID_ATTEMPTS = 8
 
 
@@ -632,6 +637,73 @@ class AuditService:
             "detail": detail,
         }
         self.repository.push_step(trace_id, step, {"updatedAt": _now()})
+        return self.repository.get_by_key(trace_id)
+
+    def record_recommendation(
+        self,
+        trace_id: str,
+        decision: str,
+        rationale: str,
+        confidence: float,
+    ) -> dict:
+        """Care-coordination agent, step 7: record a proposed outcome on the trace.
+
+        This is the write that makes a recommendation exist as data rather than as
+        conversation. Until it lands, `route_decision` has nothing to route.
+
+        **It recommends; it never closes.** `review.closedBy`, `review.routedToHuman`
+        and `audit.reviewRequired` are deliberately untouched — who may close the case
+        is decided afterwards by the bounded-authority check, reading this outcome
+        together with whether any clinical reasoning is on the trace. Keeping the two
+        apart is what stops a reasoner from closing its own case by writing a
+        confident-looking outcome.
+
+        Overwrites any previous recommendation rather than appending: a trace carries
+        one current proposal, and its history is the `steps[]` that produced it.
+
+        Raises LookupError for a missing trace (-> 404) and ValueError for an invalid
+        decision, an out-of-range confidence, or a closed trace (-> 400).
+        """
+        decision = (decision or "").strip().lower()
+        if decision not in RECOMMENDABLE_DECISIONS:
+            raise ValueError(
+                f"decision must be one of {RECOMMENDABLE_DECISIONS}, got {decision!r}."
+            )
+        if confidence is None or not 0.0 <= float(confidence) <= 1.0:
+            raise ValueError(f"confidence must be between 0 and 1, got {confidence!r}.")
+        if not (rationale or "").strip():
+            raise ValueError(
+                "rationale is required: an outcome a reviewer cannot read is not an "
+                "auditable one."
+            )
+
+        trace = self.repository.get_by_key(trace_id)
+        if not trace:
+            raise LookupError(f"Trace {trace_id} not found")
+        closed_by = (trace.get("review") or {}).get("closedBy")
+        if closed_by:
+            raise ValueError(
+                f"Trace {trace_id} was closed by {closed_by}; its outcome is part of a "
+                "finalized record and cannot be revised."
+            )
+
+        existing = trace.get("outcome") or {}
+        trace["outcome"] = {
+            "decision": decision,
+            "rationale": rationale,
+            "confidence": float(confidence),
+            # An override is a human act recorded at closure. Carry any existing values
+            # rather than resetting them, so re-recording a recommendation cannot erase
+            # a medical director's override.
+            "overrideFlag": existing.get("overrideFlag", False),
+            "overrideBy": existing.get("overrideBy"),
+            "overrideReason": existing.get("overrideReason"),
+        }
+        # Workflow field the backend reads for `summary.open_authorization_count`;
+        # kept in step with `outcome.decision` in the same write so the two cannot drift.
+        trace["status"] = decision
+        trace["updatedAt"] = _now()
+        self.repository.upsert(trace)
         return self.repository.get_by_key(trace_id)
 
     # --- bounded authority ---------------------------------------------------

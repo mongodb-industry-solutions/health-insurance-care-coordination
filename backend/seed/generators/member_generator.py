@@ -17,7 +17,7 @@ refill, etc.).
 
 from datetime import datetime, timedelta, timezone
 
-from .profiles import PatientProfile
+from .profiles import PROVIDERS, PatientProfile
 from .plans import PLANS
 
 _PLANS_BY_ID = {plan["_id"]: plan for plan in PLANS}
@@ -63,8 +63,18 @@ def _names(profile: PatientProfile) -> tuple[str, str]:
 
 
 def _provider(profile: PatientProfile) -> dict:
-    """Embedded managing-provider object (matches the datamodel's shape)."""
-    provider_id = profile.provider_id or f"PROV-{profile.state}-{_suffix(profile)[-5:]}"
+    """Embedded managing-provider object (matches the datamodel's shape).
+
+    Resolution order: an id pinned on the profile, then the shared PROVIDERS
+    registry keyed by name, then a per-member derivation. The registry step is
+    what keeps one physician on one id across every member they treat — deriving
+    from the member id would mint a new id per patient.
+    """
+    provider_id = (
+        profile.provider_id
+        or PROVIDERS.get(profile.managing_provider)
+        or f"PROV-{profile.state}-{_suffix(profile)[-5:]}"
+    )
     return {
         "providerId": provider_id,
         "name": profile.managing_provider,
@@ -352,6 +362,10 @@ def build_policy(profile: PatientProfile) -> dict:
             "currency": "USD",
             "paymentFrequency": "MONTHLY",
         },
+        # Distribution attribution. Carried because the official model does; no
+        # decision path reads either field.
+        "agentId": profile.agent_id,
+        "agencyId": profile.agency_id,
         "jurisdiction": {"state": profile.state, "country": "US"},
         "claims": [c["claimId"] for c in build_claims(profile)],
         "createdAt": _iso_ts(start),

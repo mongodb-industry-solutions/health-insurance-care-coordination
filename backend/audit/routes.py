@@ -186,6 +186,36 @@ async def append_reasoning_step(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/traces/{trace_id}/recommendation", response_model=AuditTrace)
+async def record_recommendation(
+    trace_id: str,
+    decision: str,
+    rationale: str,
+    confidence: float,
+    service: AuditService = Depends(get_audit_service),
+):
+    """Care-coordination agent, step 7: record the proposed outcome on the trace.
+
+    Writes `outcome.decision`, `outcome.rationale` and `outcome.confidence`. Until
+    this lands there is no recommendation for `/route` to act on.
+
+    This tool only ever recommends: `review.*` and `audit.reviewRequired` are left
+    alone, so who may close the case is still decided by the bounded-authority check
+    rather than by whoever wrote the outcome.
+    """
+    try:
+        return service.record_recommendation(
+            trace_id=trace_id,
+            decision=decision,
+            rationale=rationale,
+            confidence=confidence,
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/traces/{trace_id}/route", response_model=RoutingDecisionResponse)
 async def route_decision(
     trace_id: str, service: AuditService = Depends(get_audit_service)

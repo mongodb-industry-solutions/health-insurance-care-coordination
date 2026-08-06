@@ -17,7 +17,10 @@ from typing import Optional, Dict, List
 
 class TierCoverage(BaseModel):
     covered: bool
-    prior_auth_required: bool = Field(alias="priorAuthRequired")
+    # Null when the tier is not covered at all: an uncovered tier has no
+    # prior-auth question to answer, and False would read as "covered without
+    # prior auth".
+    prior_auth_required: Optional[bool] = Field(default=None, alias="priorAuthRequired")
     # Cost-share (modeled, not computed). One of coinsurance/copay is typically set.
     coinsurance: Optional[float] = None
     copay: Optional[float] = None
@@ -78,7 +81,8 @@ class Treatment(BaseModel):
     condition: Optional[str] = None  # ICD-10 the treatment applies to
     tier: Optional[str] = None
     covered: bool = True
-    prior_auth_required: bool = Field(default=True, alias="priorAuthRequired")
+    # Null on an uncovered treatment — see the note on `TierCoverage`.
+    prior_auth_required: Optional[bool] = Field(default=True, alias="priorAuthRequired")
     steps: List[TreatmentStep] = []
 
     class Config:

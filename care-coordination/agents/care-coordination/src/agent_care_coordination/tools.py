@@ -455,6 +455,105 @@ def register(app: App) -> None:
             return json.dumps({"error": f"Failed to compute recommendation: {str(e)}"})
 
     @app.tool(is_local=False)
+    def record_reasoning_step(
+        trace_id: str,
+        memory_type: str,
+        name: str,
+        detail: str,
+        confidence: float,
+    ) -> str:
+        """Record one reasoning step on the case's audit trace.
+
+        Call this immediately after each of Steps 3, 4, 5 and 6, using the `detail`
+        and `confidence` that step's tool returned — copy them exactly, never
+        paraphrase the detail or round the number. This is what turns your reasoning
+        into an auditable record instead of chat output, and it is what a second agent
+        reads to know a clinical judgement was made.
+
+        Tagging a step `episodic` or `procedural` marks the whole determination as
+        clinical, which removes any agent's authority to close it. That is correct for
+        Steps 5 and 6 and must not be softened to avoid an escalation.
+
+        Args:
+            trace_id: From get_open_case in Step 1. If it is null, Step 0 has not run
+                and there is nothing to write to — say so rather than proceeding.
+            memory_type: semantic (Step 3), taxonomic (Step 4), episodic (Step 5),
+                procedural (Step 6).
+            name: Short label, e.g. "concept_match", "trial_review".
+            detail: The `detail` string the step's tool returned, verbatim.
+            confidence: The `confidence` the step's tool returned.
+        """
+        try:
+            backend_url = _get_backend_url()
+            response = requests.post(
+                f"{backend_url}/api/audit/traces/{trace_id}/steps",
+                params={
+                    "memory_type": memory_type,
+                    "name": name,
+                    "detail": detail,
+                    "confidence": confidence,
+                },
+                timeout=5,
+            )
+            if response.status_code == 404:
+                return json.dumps({"error": f"Trace {trace_id} not found"})
+            if response.status_code == 400:
+                try:
+                    detail_msg = response.json().get("detail", "invalid request")
+                except ValueError:
+                    detail_msg = "invalid request"
+                return json.dumps({"error": f"Step not recorded: {detail_msg}"})
+            response.raise_for_status()
+            return json.dumps(response.json())
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Failed to record reasoning step: {str(e)}"})
+
+    @app.tool(is_local=False)
+    def record_recommendation(
+        trace_id: str, decision: str, rationale: str, confidence: float
+    ) -> str:
+        """Record the proposed outcome on the trace — the last thing you do in Step 7.
+
+        Pass the `recommendation`, `rationale` and `confidence` exactly as
+        `compute_recommendation` returned them. Do not substitute your own judgement
+        for the computed decision, and do not adjust the confidence.
+
+        This records a RECOMMENDATION. It does not close the case and does not decide
+        who may: that is a separate bounded-authority check the insurance agent runs
+        against this outcome. Never describe the case as approved, denied or finished
+        after calling this — it is now awaiting routing.
+
+        Args:
+            trace_id: From get_open_case in Step 1.
+            decision: approved, approved_restricted, denied or pending.
+            rationale: The plain-language rationale from compute_recommendation.
+            confidence: The aggregate confidence from compute_recommendation.
+        """
+        try:
+            backend_url = _get_backend_url()
+            response = requests.post(
+                f"{backend_url}/api/audit/traces/{trace_id}/recommendation",
+                params={
+                    "decision": decision,
+                    "rationale": rationale,
+                    "confidence": confidence,
+                },
+                timeout=5,
+            )
+            if response.status_code == 404:
+                return json.dumps({"error": f"Trace {trace_id} not found"})
+            if response.status_code == 400:
+                try:
+                    detail_msg = response.json().get("detail", "invalid request")
+                except ValueError:
+                    detail_msg = "invalid request"
+                return json.dumps({"error": f"Recommendation not recorded: {detail_msg}"})
+            response.raise_for_status()
+            return json.dumps(response.json())
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Failed to record recommendation: {str(e)}"})
+
+    @app.tool(is_local=False)
     def get_member_authorizations(member_id: str) -> str:
         """Retrieve all prior-authorization decision traces (past and pending) for a member.
 
