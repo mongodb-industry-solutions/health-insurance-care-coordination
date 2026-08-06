@@ -313,14 +313,21 @@ def register(app: App) -> None:
             return json.dumps({"error": f"Failed to verify eligibility: {str(e)}"})
 
     @app.tool(is_local=False)
-    def check_treatment_coverage(plan_id: str, treatment_code: str, condition: str) -> str:
+    def check_treatment_coverage(
+        plan_id: str, condition: str, treatment_code: str = "", drug: str = ""
+    ) -> str:
         """Step 2 — the second administrative gate: does the plan cover this treatment?
 
-        Resolves the entry in the plan's `treatments[]` matching both
-        `treatmentCode` and `condition`, then evaluates its `steps[]`. Returns
+        Resolves the entry in the plan's `treatments[]` matching the treatment and
+        `condition`, then evaluates its `steps[]`. Returns
         `{"covered": bool, "restriction": "none" | "partial" | null,
         "coveredSteps": [...], "uncoveredSteps": [...], "priorAuthRequired": bool
-        | null, "reason": str | null}`.
+        | null, "reason": str | null, "matchedOn": str | null, "detail": str}`.
+
+        Identify the treatment by `treatment_code` when you have it — that match is
+        exact. Fall back to `drug` when the pending action names a therapy in prose
+        but gives no code. `condition` is required either way: a treatment code is
+        listed once per condition it applies to, so it is not unique on its own.
 
         Read the result exactly as follows:
         - `covered: false` — STOP. Clinical review never runs. Close the case
@@ -335,15 +342,22 @@ def register(app: App) -> None:
 
         Args:
             plan_id: Plan business key, e.g. PLAN-PPO-SPEC-4471.
-            treatment_code: Drug/procedure code, e.g. J3590. Matches
-                `Plan.treatments[].treatmentCode` directly.
             condition: ICD-10 code the treatment is requested for, e.g. M06.9.
+            treatment_code: Drug/procedure code, e.g. J3590. Matches
+                `Plan.treatments[].treatmentCode` directly. Preferred when known.
+            drug: Therapy name, e.g. "secukinumab". Used only when no code is
+                available; matched against the plan's treatment names.
         """
+        params = {"condition": condition}
+        if treatment_code:
+            params["treatment_code"] = treatment_code
+        if drug:
+            params["drug"] = drug
         try:
             backend_url = _get_backend_url()
             response = requests.get(
                 f"{backend_url}/api/plans/{plan_id}/coverage",
-                params={"treatment_code": treatment_code, "condition": condition},
+                params=params,
                 timeout=5,
             )
             if response.status_code == 404:

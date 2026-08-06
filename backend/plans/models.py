@@ -110,3 +110,45 @@ class Plan(BaseModel):
 class PlansListResponse(BaseModel):
     count: int
     plans: List[Plan]
+
+
+class CoverageCheckResponse(BaseModel):
+    """Result of the second administrative gate — does the plan cover this
+    treatment, and which stages of it? (Insurance Agent, step 2.)
+
+    Three outcomes matter to the caller:
+
+    - `covered: false` stops the process. No clinical review runs, and the agent
+      closes the case itself as a benefit-exclusion determination.
+    - `restriction: "partial"` means some stages of the protocol are funded and
+      others are not. The case still goes to clinical review, but its eventual
+      outcome must be `approved_restricted`, never a plain approval — the member
+      carries the cost of `uncovered_steps`.
+    - `covered: true` with `restriction: "none"` is a clean pass to clinical
+      review, gated on `prior_auth_required`.
+    """
+    covered: bool
+    # none | partial when covered; null when not covered.
+    restriction: Optional[str] = None
+    # stepCode values, split by whether the plan funds that stage.
+    covered_steps: List[str] = Field(default=[], alias="coveredSteps")
+    uncovered_steps: List[str] = Field(default=[], alias="uncoveredSteps")
+    # Null when the treatment is not covered at all: prior authorization is moot
+    # for a benefit the plan does not provide.
+    prior_auth_required: Optional[bool] = Field(default=None, alias="priorAuthRequired")
+    # treatment_not_listed_for_condition | benefit_exclusion | no_steps_covered
+    reason: Optional[str] = None
+    tier: Optional[str] = None
+    plan_id: str = Field(alias="planId")
+    treatment_code: Optional[str] = Field(default=None, alias="treatmentCode")
+    treatment_name: Optional[str] = Field(default=None, alias="treatmentName")
+    condition: Optional[str] = None
+    # How the treatments[] entry was resolved: "treatment_code" is exact,
+    # "treatment_name" is a substring match on prose and is reflected in a lower
+    # confidence. Null when nothing matched.
+    matched_on: Optional[str] = Field(default=None, alias="matchedOn")
+    confidence: float
+    detail: str
+
+    class Config:
+        populate_by_name = True

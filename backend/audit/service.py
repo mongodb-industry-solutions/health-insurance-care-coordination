@@ -19,6 +19,7 @@ from .repository import AuditRepository
 from members.repository import MemberRepository
 from policies.repository import PolicyRepository
 from plans.repository import PlanRepository
+from plans.service import PlanService
 from guidelines.repository import GuidelineRepository
 from claims.service import ClaimService
 
@@ -182,20 +183,26 @@ class AuditService:
         """Does the member's plan cover the requested therapy? Returns
         (covered, matched_treatment_or_None).
 
-        Treatment-level lookup first: match a plan `treatments[]` entry by `drug`
-        (+ `condition` when the treatment scopes one). That entry's `covered` flag
-        is authoritative — a plan can cover the specialty tier generally yet include
-        or exclude a specific biologic. Falls back to tier-level coverage when the
-        therapy has no explicit treatment entry (backward compatible).
+        Treatment-level lookup first, delegated to `PlanService.find_treatment` so
+        this shares one matcher with the Insurance Agent's coverage endpoint — two
+        implementations would eventually disagree about whether a plan covers
+        something, and the clinical path would decide on different facts than the
+        administrative gate. The matched entry's `covered` flag is authoritative: a
+        plan can cover the specialty tier generally yet exclude a specific biologic.
+
+        Falls back to tier-level coverage when the therapy has no treatment entry.
+
+        Note that `therapy` is a drug name, never a code — this path resolves it
+        through `treatmentName`, since the final data model has no `drug` field.
+        The previous implementation matched on that removed field, so it never
+        matched anything and every treatment-level exclusion was silently missed.
         """
         plan = self._resolve_plan(member)
-        therapy_l = (therapy or "").lower()
-        for t in plan.get("treatments", []):
-            if t.get("drug", "").lower() != therapy_l:
-                continue
-            if t.get("condition") and diagnosis_code and t["condition"] != diagnosis_code:
-                continue
-            return bool(t.get("covered")), t
+        entry, _matched_on = PlanService.find_treatment(
+            plan, condition=diagnosis_code, drug=therapy
+        )
+        if entry:
+            return bool(entry.get("covered")), entry
 
         # No treatment-level entry — fall back to the tier flag.
         if not therapy_tier:
