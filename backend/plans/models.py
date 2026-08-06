@@ -61,13 +61,19 @@ class TreatmentStep(BaseModel):
 class Treatment(BaseModel):
     """A specific treatment the plan covers and the steps it pays for.
 
-    Keyed by `drug` (+ `condition`) so a coverage check can resolve directly from
-    how the agent names the considered therapy, rather than string-matching display
-    names. `treatment_code` (a J-code) also lines up with `claims.procedureCode`.
+    Keyed by `treatment_code` + `condition`. Neither alone is unique: the same
+    code appears once per condition it applies to (e.g. methotrexate `6851` under
+    both `M06.9` and `L40.50`), so a coverage check must match on both.
+    `treatment_code` also lines up with `claims.procedureCode`.
+
+    `drug` is a legacy lookup key that the final data model dropped in favour of
+    `treatment_code`; it is optional because live documents do not carry it.
+    Resolving a therapy the agent named in prose (e.g. "secukinumab") goes through
+    `treatment_name` instead — see `PlanService.check_treatment_coverage`.
     """
     treatment_code: Optional[str] = Field(default=None, alias="treatmentCode")
     treatment_name: Optional[str] = Field(default=None, alias="treatmentName")
-    drug: str                       # lookup key, e.g. "secukinumab"
+    drug: Optional[str] = None      # legacy lookup key; absent in the final model
     rxnorm: Optional[str] = None
     condition: Optional[str] = None  # ICD-10 the treatment applies to
     tier: Optional[str] = None
