@@ -280,9 +280,11 @@ def register(app: App) -> None:
         `effective_trial_months` is the answer, and the only figure Step 6 evaluates.
         The other durations are context, and each means something specific:
 
-        * `documented_months` — what someone wrote on the record. It can lag a trial
-          the member is still refilling, so it is not authoritative. It often equals
-          `effective_trial_months`; do not assume the two disagree.
+        * `documented_months` — what a clinician wrote on the record. An interim note
+          goes stale while the member keeps refilling, so this is often SHORTER than
+          the effective figure. Report both when they differ: a record understating a
+          trial is how an adequate trial gets wrongly rejected. A `gap_reviewed` entry
+          is excluded from it, so this agent's own writes never inflate it.
         * `longest_continuous_months` — the longest uninterrupted run of fills. This
           is credited INSTEAD of the full span only when a gap is unexplained. When
           the gap is explained it is not the trial duration, and reporting it as one
@@ -319,12 +321,12 @@ def register(app: App) -> None:
 
     @app.tool(is_local=False)
     def detect_refill_gaps(member_id: str, drug: str = "") -> str:
-        """Step 5b: see the specific breaks in a member's refill cadence.
+        """Scan a member's refill cadence across drugs. Rarely needed in Step 5b.
 
-        Analyzes the pharmacy claims timeline and returns any interval between
-        consecutive fills that is longer than expected. Call it after
-        `review_trial_history` reports `anomaly_detected`, to see the individual gaps
-        before deciding whether documentation explains them.
+        Returns any interval between consecutive fills that is longer than expected.
+        `review_trial_history` already returns exactly this for the drug under review,
+        in its `gaps` field — so during a case, read that instead. Reach for this only
+        to look at a DIFFERENT drug, or with no drug filter to scan them all.
 
         `gap_days` is the interval between fills, NOT days the member was off the
         drug: one missed monthly refill reads as roughly 60 days. Report it together
@@ -367,6 +369,9 @@ def register(app: App) -> None:
         Do NOT call it for an unexplained gap. There is nothing to record: only the
         longest uninterrupted run is credited, and the case leans to human review.
         Calling it anyway asserts an explanation you do not have.
+
+        Call it once per drug. A second call for the same drug replaces the first
+        entry rather than adding another, so repeating it changes nothing.
 
         Args:
             member_id: The member's unique ID.

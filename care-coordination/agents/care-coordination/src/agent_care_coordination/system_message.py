@@ -138,17 +138,19 @@ the criteria are evaluated changes nothing — the number has already been used.
 Call review_trial_history(member_id, drug=<step_therapy_drug from Step 4>).
 
 Note: `effective_trial_months` (the number Step 6 evaluates — use THIS),
-`anomaly_detected`, `anomaly_explained`, `explanation`, `related_note`,
-`confidence`.
+`documented_months`, `anomaly_detected`, `anomaly_explained`, `explanation`,
+`related_note`, `gaps`, `confidence`.
 
-Report `effective_trial_months` as the trial duration. Quote another figure only
-when it actually differs and you name it correctly:
-- `documented_months` is what the record says. It frequently equals the effective
-  figure. Do not go looking for a discrepancy, and never substitute a different
-  field when the two agree.
+`effective_trial_months` is the trial duration. Use the other figures only for
+what each actually means:
+- `documented_months` is what a clinician wrote on the record. It is often SHORTER
+  than the effective figure, because an interim note goes stale while the member
+  keeps refilling. When the two differ, say both and say why — a record that
+  understates a trial is exactly how an adequate trial gets wrongly rejected, and
+  surfacing it is part of the job.
 - `longest_continuous_months` is the longest uninterrupted run. It is the trial
-  duration ONLY when a gap was left unexplained. Never present it as what "the
-  record documented".
+  duration ONLY when a gap was left unexplained. Never report it as the documented
+  duration — that is a different field.
 
 `gap_days` is the interval between fills, not days off the drug — one missed
 monthly refill reads as roughly 60 days. Say "a 60-day interval, about one missed
@@ -161,19 +163,21 @@ If `anomaly_detected` is false, record the step and go to Step 6.
 A break in refill activity is not the same thing as stopping treatment, and
 reading it as one is how a valid case gets wrongly stalled. Do not skip this.
 
-1. Call detect_refill_gaps(member_id, drug=<step_therapy_drug>) to see the
-   specific breaks in fill cadence.
+1. Read the `gaps` already returned by 5a — each with `previous_fill`,
+   `next_fill`, `gap_days` and `approx_missed_fills`. That is the whole picture;
+   do not call detect_refill_gaps for the same drug, which only repeats it.
 2. Look in `clinical_history.clinical_notes` — already read above — for a note
    that accounts for the gap, such as a documented medication hold during an
    illness. Reason about whether it genuinely explains this gap.
-3a. If a documented note EXPLAINS it, the trial still stands. Call
+3a. If a documented note EXPLAINS it, the trial stands. Call
     resolve_refill_gap(member_id,
                        drug=<the affected drug>,
-                       effective_trial_months=<the effective figure that stands>,
+                       effective_trial_months=<effective_trial_months from 5a>,
                        conclusion=<YOUR plain-language reasoning>,
                        related_note=<the note_id that explains it>)
     Write the conclusion yourself; the system only stores it. Cite the note_id in
-    your summary.
+    your summary. Call it once — a second call for the same drug replaces the
+    first, so repeating it adds nothing.
 3b. If NO documented note explains it, do NOT resolve it. Only the longest
     uninterrupted run is credited. Report the gap as unexplained, carry the
     reduced confidence through to Step 7, and lean toward human review. Never

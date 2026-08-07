@@ -224,9 +224,18 @@ class MemberService:
             for r in history.get("treatment_responses") or []
             if (r.get("drug") or "").strip().lower() == wanted
         ]
+        # `documented_months` is what a CLINICIAN wrote down, so a gap_reviewed entry
+        # is excluded: that one holds `effective_trial_months`, which this method
+        # derived itself. Counting it would let a resolved gap raise the documented
+        # figure on the next read — the agent's own output feeding back in as though
+        # it were documentation, and the stale interim record (Maria: 3 months against
+        # 7 months of fills) quietly disappearing after the first run.
+        clinician_documented = [
+            r for r in responses if (r.get("outcome") or "") != "gap_reviewed"
+        ]
         # Later entries supersede earlier interim ones rather than adding to them.
         documented_months = max(
-            [float(r.get("duration_months") or 0) for r in responses] or [0.0]
+            [float(r.get("duration_months") or 0) for r in clinician_documented] or [0.0]
         )
 
         fills = self._fill_dates(member_id, drug)
@@ -638,6 +647,20 @@ class MemberService:
         gap stays explained — `review_trial_history` reads a `gap_reviewed` entry back
         as documentation on a later run. Generic: no condition or drug is hardcoded.
 
+        **Idempotent per drug.** A re-run leaves exactly one `gap_reviewed` entry for
+        the drug, as the newest one. The same gap reviewed twice is one conclusion
+        re-stated, not two findings.
+
+        Only `gap_reviewed` entries for this drug are dropped — every one of them, not
+        just the entry being superseded — so a record carrying duplicates from before
+        this was idempotent is repaired on the next write. That matters because
+        `review_trial_history` reads `prior_reviews[-1]`: leaving an older duplicate
+        in place after the new entry would keep serving a stale conclusion no re-run
+        could displace.
+
+        Clinician-written responses for this drug are untouched, as are all entries
+        for other drugs. This method only ever supersedes its own output.
+
         Returns the updated member, or None if it does not exist.
         """
         member = self.repository.get_by_key(member_id)
@@ -659,7 +682,22 @@ class MemberService:
         # trail no longer carries this — it lives on the record).
         if related_note:
             entry["related_note"] = related_note
-        clinical.setdefault("treatment_responses", []).append(entry)
+
+        wanted = (drug or "").strip().lower()
+        kept = [
+            r
+            for r in clinical.get("treatment_responses") or []
+            if not (
+                (r.get("outcome") or "") == "gap_reviewed"
+                and (r.get("drug") or "").strip().lower() == wanted
+            )
+        ]
+        # Appended last, so `prior_reviews[-1]` reads this conclusion and not an older
+        # one. Entries for other drugs, and this drug's clinician-written responses,
+        # keep their original order.
+        kept.append(entry)
+        clinical["treatment_responses"] = kept
+
         member["updatedAt"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         self.repository.upsert(member)
         return member
