@@ -1,11 +1,29 @@
-"""care-coordination Magenta app."""
+"""care-coordination Magenta app.
+
+The Care-Coordination Agent's half of the prior-authorization process: Steps 3-7,
+the clinical assessment. It picks up a case the Insurance Agent already opened,
+reasons over the member's record and the applicable guideline, and records a
+recommendation on the decision trace. It never routes or closes a case.
+
+The agent holds no database driver. Every domain read and write is an HTTP call to
+the FastAPI service (`BACKEND_URL`), which owns the data and enforces the
+authority rules deterministically, server-side.
+
+The platform launches this code in supported runtime roles:
+    RUNNER_MODE=aer            -> Full LangGraph execution
+    RUNNER_MODE=tool           -> Tool function execution
+    RUNNER_MODE=memory-server  -> Long-term memory service
+"""
 
 from __future__ import annotations
 
 import logging
-from typing import Literal
+import sys
+from datetime import date
+from typing import Literal, Optional
 
 from dotenv import load_dotenv
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -13,176 +31,95 @@ from langgraph.prebuilt import ToolNode
 from magenta_sdklanggraph import App
 
 from agent_care_coordination.llm import build_llm
-from agent_care_coordination.state import HelloWorldState
-from agent_care_coordination.system_message import (
-    ANSWER_PROMPT,
-    DECISION_PROMPT,
-    PATHWAY_PROMPT,
-    TRIAGE_PROMPT,
-    VERIFICATION_PROMPT,
-)
+from agent_care_coordination.state import AgentState
+from agent_care_coordination.system_message import SYSTEM_PROMPT
 from agent_care_coordination.tools import register
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(message)s",
+    datefmt="%H:%M:%S",
+    stream=sys.stdout,
+)
 logger = logging.getLogger(__name__)
 load_dotenv()
 
-app = App(app_name="care-coordination")
+APP_NAME = "care-coordination"
+
+app = App(app_name=APP_NAME)
 
 register(app)
 
-# Tools the read-only answer branch may use. Anything that writes to a member's
-# record — filing, processing, notifying, resolving a gap — is deliberately absent,
-# so a question cannot mutate state even if the model tries.
-READ_ONLY_TOOLS = frozenset(
-    {
-        "get_current_date",
-        "recall_user_info",
-        "get_member_clinical_context",
-        "get_applicable_guideline",
-        "find_comparable_claims",
-        "detect_refill_gaps",
-        "get_member_authorizations",
-    }
-)
-
-
-def _tool_name(tool: object) -> str | None:
-    """Tool name from either a tool object or a raw schema dict."""
-    if isinstance(tool, dict):
-        return tool.get("name")
-    return getattr(tool, "name", None)
-
 
 @app.entrypoint
-def build_agent() -> CompiledStateGraph:
-    """Build the LangGraph agent."""
+def build_agent(llm: Optional[BaseChatModel] = None) -> CompiledStateGraph:
+    """Build the LangGraph agent.
+
+    Args:
+        llm: LLM to use. Defaults to app.llm() when None. Pass an explicit LLM
+            (e.g. a FakeLLM) for testing without real API calls.
+    """
     logger.info("Building care-coordination graph")
-    llm_config = getattr(app, "llm_config", None)
-    runtime_llm = app.llm(
-        build_llm(
-            provider=getattr(llm_config, "provider", None),
-            model=getattr(llm_config, "model", None),
-            temperature=0,
+
+    if llm is None:
+        llm_config = getattr(app, "llm_config", None)
+        llm = app.llm(
+            build_llm(
+                provider=getattr(llm_config, "provider", None),
+                model=getattr(llm_config, "model", None),
+                temperature=0,
+            )
         )
-    )
+
     tools = app.get_tools()
-    schemas = app.get_tool_schemas()
-    read_only_tools = [t for t in tools if _tool_name(t) in READ_ONLY_TOOLS]
-    read_only_schemas = [s for s in schemas if _tool_name(s) in READ_ONLY_TOOLS]
+    llm_with_tools = llm.bind_tools(app.get_tool_schemas())
 
-    llm_with_tools = runtime_llm.bind_tools(schemas)
-    llm_read_only = runtime_llm.bind_tools(read_only_schemas)
+    def agent_node(state: AgentState) -> dict:
+        user_id = state.get("user_id", "")
 
-    def _history(state: HelloWorldState) -> list:
-        """Shared conversation history with any stray SystemMessage removed, so a
-        node's own persona prompt is the only system prompt it sees."""
-        return [m for m in state["messages"] if not isinstance(m, SystemMessage)]
+        # Trial durations are read against today, so state the date rather than
+        # letting the model assume it.
+        prompt = f"{SYSTEM_PROMPT}\n\n## Current session\nToday's date is {date.today().isoformat()}."
+        if user_id:
+            prompt += f" You are speaking with user_id: {user_id}."
 
-    def _run_agent(prompt: str, state: HelloWorldState, llm=None) -> dict:
-        """Invoke the LLM for one agent node with its own system prompt.
-
-        The system prompt is applied per-invocation and never stored in state, so
-        each node sees the full shared history under its own persona. `llm`
-        defaults to the full tool set; the answer node passes the read-only one.
-        """
-        response = (llm or llm_with_tools).invoke(
-            [SystemMessage(content=prompt)] + _history(state)
-        )
+        history = [m for m in state["messages"] if not isinstance(m, SystemMessage)]
+        response = llm_with_tools.invoke([SystemMessage(content=prompt)] + history)
         response = app.validate_llm_response(response)
         return {"messages": [response]}
 
-    def _has_tool_calls(state: HelloWorldState) -> bool:
+    def should_continue(state: AgentState) -> Literal["tools", "end"]:
         last = state["messages"][-1]
-        return bool(getattr(last, "tool_calls", None))
+        return "tools" if getattr(last, "tool_calls", None) else "end"
 
-    # --- Node 0: triage (question vs. authorization workflow) ----------------
-    def triage_node(state: HelloWorldState) -> dict:
-        """Classify intent WITHOUT tools and WITHOUT adding to the transcript.
+    builder = StateGraph(AgentState)
+    builder.add_node("agent", agent_node)
+    builder.add_node("tools", ToolNode(tools))
+    builder.add_edge(START, "agent")
+    builder.add_conditional_edges("agent", should_continue, {"tools": "tools", "end": END})
+    builder.add_edge("tools", "agent")
 
-        Returns only `mode`, so the classification never appears as a message the
-        user sees or that a later persona has to reason around.
-        """
-        verdict = runtime_llm.invoke(
-            [SystemMessage(content=TRIAGE_PROMPT)] + _history(state)
+    # The checkpointer needs MongoDB. If it is unreachable the agent should still
+    # answer single-turn requests rather than fail to build, which would turn
+    # every request into a 500.
+    try:
+        checkpointer = app.checkpointer()
+    except Exception as e:
+        logger.warning(
+            f"Failed to construct checkpointer ({e}) — running without conversation persistence."
         )
-        text = str(getattr(verdict, "content", "") or "").upper()
-        # Default to the read-only branch: filing an authorization writes to a
-        # member's record, so it happens only on an unambiguous WORKFLOW verdict.
-        mode = "workflow" if "WORKFLOW" in text else "question"
-        logger.info("Triage classified request as: %s", mode)
-        return {"mode": mode}
+        checkpointer = None
 
-    def triage_route(state: HelloWorldState) -> Literal["answer", "pathway"]:
-        return "pathway" if state.get("mode") == "workflow" else "answer"
-
-    # --- Node 0a: answer (read-only Q&A; never reaches the decision node) ----
-    def answer_node(state: HelloWorldState) -> dict:
-        return _run_agent(ANSWER_PROMPT, state, llm=llm_read_only)
-
-    def answer_route(state: HelloWorldState) -> Literal["tools", "end"]:
-        return "tools" if _has_tool_calls(state) else "end"
-
-    # --- Node 1: pathway agent (assembles the case) --------------------------
-    def pathway_node(state: HelloWorldState) -> dict:
-        return _run_agent(PATHWAY_PROMPT, state)
-
-    def pathway_route(state: HelloWorldState) -> Literal["tools", "verify"]:
-        # Loop through its own tools until done, then hand off to verification.
-        return "tools" if _has_tool_calls(state) else "verify"
-
-    # --- Node 2: verification agent (independently reviews the synthesis) ----
-    def verification_node(state: HelloWorldState) -> dict:
-        return _run_agent(VERIFICATION_PROMPT, state)
-
-    def verification_route(state: HelloWorldState) -> Literal["tools", "decide"]:
-        # Loop through its own tools until done, then hand off to the decision step.
-        return "tools" if _has_tool_calls(state) else "decide"
-
-    # --- Node 3: decision (files + processes + notifies; never closes a denial) --
-    def decision_node(state: HelloWorldState) -> dict:
-        return _run_agent(DECISION_PROMPT, state)
-
-    def decision_route(state: HelloWorldState) -> Literal["tools", "end"]:
-        return "tools" if _has_tool_calls(state) else "end"
-
-    builder = StateGraph(HelloWorldState)
-    builder.add_node("triage", triage_node)
-    builder.add_node("answer", answer_node)
-    builder.add_node("answer_tools", ToolNode(read_only_tools))
-    builder.add_node("pathway", pathway_node)
-    builder.add_node("pathway_tools", ToolNode(tools))
-    builder.add_node("verification", verification_node)
-    builder.add_node("verification_tools", ToolNode(tools))
-    builder.add_node("decision", decision_node)
-    builder.add_node("decision_tools", ToolNode(tools))
-
-    builder.add_edge(START, "triage")
-    builder.add_conditional_edges(
-        "triage", triage_route, {"answer": "answer", "pathway": "pathway"}
-    )
-    builder.add_conditional_edges(
-        "answer", answer_route, {"tools": "answer_tools", "end": END}
-    )
-    builder.add_edge("answer_tools", "answer")
-    builder.add_conditional_edges(
-        "pathway", pathway_route, {"tools": "pathway_tools", "verify": "verification"}
-    )
-    builder.add_edge("pathway_tools", "pathway")
-    builder.add_conditional_edges(
-        "verification", verification_route,
-        {"tools": "verification_tools", "decide": "decision"},
-    )
-    builder.add_edge("verification_tools", "verification")
-    builder.add_conditional_edges(
-        "decision", decision_route, {"tools": "decision_tools", "end": END}
-    )
-    builder.add_edge("decision_tools", "decision")
-    return builder.compile(checkpointer=app.checkpointer())
+    graph = builder.compile(checkpointer=checkpointer)
+    logger.info("✅ Agent graph compiled")
+    return graph
 
 
 def main() -> None:
-    """Run the hello-world agent."""
+    """Main entry point."""
+    logger.info("=" * 60)
+    logger.info(f"🚀 Starting {APP_NAME} (Runner SDK)")
+    logger.info("=" * 60)
     app.run()
 
 

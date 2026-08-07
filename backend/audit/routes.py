@@ -50,8 +50,7 @@ async def create_trace(
     """Insurance Agent, step 0: open an empty decision trace for a case.
 
     Returns the new trace with a generated `traceId` and empty `steps[]`. Nothing is
-    decided here. Distinct from `/traces/file`, which is the provider filing a
-    request; this is the insurance side opening the case shell.
+    decided here; this is the insurance side opening the case shell.
     """
     try:
         return service.create_trace(
@@ -65,32 +64,6 @@ async def create_trace(
         )
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.post("/traces/file", response_model=AuditTrace)
-async def file_trace(
-    member_id: str,
-    requested_service: str,
-    service: AuditService = Depends(get_audit_service),
-):
-    """Phase 3, step 1: file a formal prior-authorization request (pending trace)."""
-    try:
-        return service.file_trace(member_id=member_id, requested_service=requested_service)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-
-@router.post("/traces/process", response_model=AuditTrace)
-async def process_trace(
-    member_id: str,
-    service: AuditService = Depends(get_audit_service),
-):
-    """Phase 3, step 2: process the member's pending trace — compute the decision,
-    record the memory-typed steps + outcome, and apply bounded authority."""
-    try:
-        return service.process_trace(member_id=member_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

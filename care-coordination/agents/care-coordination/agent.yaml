@@ -8,7 +8,7 @@ entrypoint: agent_care_coordination.main:app
 framework: langgraph
 config:
     provider: openai
-    model: gpt-5.4-mini
+    model: gpt-5.4
 features:
     memory: true
 # Declare which secrets each workload may access. Platform-required secrets

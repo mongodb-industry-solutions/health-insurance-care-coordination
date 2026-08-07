@@ -153,15 +153,18 @@ async def document_treatment_response(
 async def resolve_refill_gap(
     member_id: str,
     drug: str,
-    effective_trial_months: int,
+    effective_trial_months: float,
     conclusion: str,
     related_note: str = "",
     service: MemberService = Depends(get_member_service),
 ):
-    """Phase 2, step 2: attach the verification agent's gap conclusion.
+    """Step 5b: attach the care-coordination agent's gap conclusion.
 
-    Persists the agent-authored `conclusion` as a treatment_response. Returns the
-    updated member.
+    Persists the agent-authored `conclusion` as a treatment_response, so an explained
+    gap stays explained for this case and every later one. Returns the updated member.
+
+    `effective_trial_months` is a float because `/trial-history` derives it from fill
+    dates and can land on a half month; typing it as an int rejected those with a 422.
     """
     member = service.resolve_refill_gap(
         member_id=member_id,
