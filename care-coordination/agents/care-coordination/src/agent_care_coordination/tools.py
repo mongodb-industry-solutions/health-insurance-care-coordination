@@ -353,7 +353,7 @@ def register(app: App) -> None:
     def resolve_refill_gap(
         member_id: str,
         drug: str,
-        effective_trial_months: int,
+        effective_trial_months: float,
         conclusion: str,
         related_note: str = "",
     ) -> str:
@@ -372,7 +372,8 @@ def register(app: App) -> None:
             member_id: The member's unique ID.
             drug: The drug whose trial had the gap (e.g. "Methotrexate").
             effective_trial_months: `effective_trial_months` from review_trial_history —
-                the duration that stands once the gap is explained. Whole months.
+                the duration that stands once the gap is explained. Pass it through
+                exactly as returned, including a fractional month; do not round it.
             conclusion: Your own reasoning for why the gap does not invalidate the
                 trial. Write it yourself; the system only stores it.
             related_note: The note_id of the clinical note that explains the gap

@@ -117,7 +117,10 @@ class ClassificationResponse(BaseModel):
     # The gate Steps 5 and 6 go on to evaluate.
     step_therapy_applies: bool
     step_therapy_drug: Optional[str] = None
-    step_therapy_min_months: Optional[int] = None
+    # Float to match `required_months` on the step-therapy response: both surface the
+    # same guideline value, and typing them differently means a guideline with a
+    # fractional minimum would validate on one endpoint and 500 on the other.
+    step_therapy_min_months: Optional[float] = None
     # The bar the aggregate confidence is checked against in Step 8.
     confidence_threshold: Optional[float] = None
     confidence: float

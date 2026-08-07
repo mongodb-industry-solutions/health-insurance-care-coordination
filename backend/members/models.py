@@ -31,7 +31,11 @@ class Medication(BaseModel):
 
 class TreatmentResponse(BaseModel):
     drug: str
-    duration_months: int
+    # Float, because a gap-review entry records the `effective_trial_months` derived
+    # from fill dates rather than a hand-written whole number. Pydantic rejects a
+    # fractional value for an `int` field (int_from_float) instead of truncating it,
+    # so typing this as an int would fail the write AND every later read of the member.
+    duration_months: float
     outcome: str
     notes: str
     documented_by: str
