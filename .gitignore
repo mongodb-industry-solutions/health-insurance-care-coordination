@@ -238,3 +238,6 @@ frontend/next-env.d.ts
 
 # Misc
 *.pem
+
+
+*/data

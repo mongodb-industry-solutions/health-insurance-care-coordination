@@ -10,6 +10,7 @@ class PolicyRepository(Repository):
     """
 
     collection_name = Collections.POLICIES
+    business_key = "policyId"
 
     def find_by_plan(self, plan_id):
         return self.find({"planId": plan_id})

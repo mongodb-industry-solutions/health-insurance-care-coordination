@@ -24,6 +24,23 @@ because they are factual benefit/eligibility calls, not clinical judgment — th
 from dataclasses import dataclass, field
 
 
+# A provider is one entity with one id, however many members they treat. Derived
+# per-member ids would give Dr. Patel a different id on each of his three
+# patients, which is wrong the moment anything groups cases by physician.
+#
+# `Dr. Patel` and `Dr. Ibrahim` are taken from source/documents/claims.json. The
+# other two are not attested in any source document — they follow the same
+# PROV-{STATE}-{NNNNN} convention and are scoped to the state each provider
+# practises in, but they are invented and should be reconciled if a provider
+# registry ever lands upstream.
+PROVIDERS = {
+    "Dr. Patel": "PROV-IL-00201",       # from claims.json (CLM-IL-2026-77201)
+    "Dr. Ibrahim": "PROV-CA-00688",     # from claims.json (CLM-CA-2026-90220)
+    "Dr. Okafor": "PROV-TX-00347",      # invented
+    "Dr. Nguyen": "PROV-NY-00512",      # invented
+}
+
+
 @dataclass
 class TrialGap:
     """A pause in a medication trial the naive matcher would misread."""
@@ -79,21 +96,32 @@ class PatientProfile:
     tags: list[str] = field(default_factory=list)
 
     # --- Official-data-model additions (defaults keep existing literals valid) ---
-    # The member references a Policy (which references the plan). If unset, the
-    # generator derives one deterministically from the member id.
+    # The member references a Policy (which references the plan). Set explicitly
+    # from `source/documents/policies_3.json` — the shared source of truth for
+    # policy identifiers — rather than derived, so the seeded records line up with
+    # the documents the insurance-agent work is written against.
     policy_number: str | None = None
     state: str = "OH"
     preferred_language: str = "en"          # ISO language code
     provider_id: str | None = None          # embedded managing-provider id
     provider_specialty: str = "Rheumatology"
     annual_premium: float = 4200.0          # modeled, not used in any math
+    # Distribution attribution carried on the Policy. Opaque to every decision
+    # path — present because the official model (and the source documents) carry
+    # them, not because anything reads them.
+    agent_id: str | None = None
+    agency_id: str | None = None
 
 
 # --- Maria: the canonical clean-approval story from the narrative ------------
 
 MARIA = PatientProfile(
     member_id="MBR-2026-44109",
-    plan_id="PLAN-PPO-7731",
+    plan_id="PLAN-PPO-SPEC-4471",
+    policy_number="POL-HP-2026-04410",
+    state="IL",
+    agent_id="AGT-00118",
+    agency_id="AGY-00042",
     name="Maria Reyes",
     birth_date="1983-04-12",
     gender="female",
@@ -137,7 +165,11 @@ MARIA = PatientProfile(
 
 ROBERT = PatientProfile(
     member_id="MBR-2026-51882",
-    plan_id="PLAN-PPO-7731",
+    plan_id="PLAN-PPO-SPEC-4471",
+    policy_number="POL-HP-2026-05188",
+    state="TX",
+    agent_id="AGT-00229",
+    agency_id="AGY-00042",
     name="Robert Chen",
     birth_date="1975-11-03",
     gender="male",
@@ -165,7 +197,11 @@ ROBERT = PatientProfile(
 
 AISHA = PatientProfile(
     member_id="MBR-2026-60417",
-    plan_id="PLAN-HMO-4420",
+    plan_id="PLAN-HMO-SPEC-2290",
+    policy_number="POL-HP-2026-06041",
+    state="NY",
+    agent_id="AGT-00301",
+    agency_id="AGY-00077",
     name="Aisha Bello",
     birth_date="1990-07-22",
     gender="female",
@@ -193,7 +229,10 @@ AISHA = PatientProfile(
 
 DAVID = PatientProfile(
     member_id="MBR-2026-73305",
-    plan_id="PLAN-PPO-7731",
+    plan_id="PLAN-PPO-SPEC-4471",
+    policy_number="POL-HP-2026-08841",
+    agent_id="AGT-00421",
+    agency_id="AGY-00071",
     name="David Thompson",
     birth_date="1968-02-17",
     gender="male",
@@ -223,7 +262,11 @@ DAVID = PatientProfile(
 
 GRACE = PatientProfile(
     member_id="MBR-2026-88214",
-    plan_id="PLAN-HMO-STD-3300",   # standard-only plan: specialty NOT covered
+    plan_id="PLAN-PPO-STD-1100",   # standard-only plan: specialty NOT covered
+    policy_number="POL-HP-2026-08821",
+    state="IL",
+    agent_id="AGT-00118",
+    agency_id="AGY-00042",
     name="Grace Kim",
     birth_date="1979-09-30",
     gender="female",
@@ -251,7 +294,11 @@ GRACE = PatientProfile(
 
 FRANK = PatientProfile(
     member_id="MBR-2026-90733",
-    plan_id="PLAN-PPO-7731",
+    plan_id="PLAN-PPO-SPEC-4471",
+    policy_number="POL-HP-2026-09073",
+    state="CA",
+    agent_id="AGT-00555",
+    agency_id="AGY-00090",
     name="Frank Alvarez",
     birth_date="1972-06-08",
     gender="male",
@@ -266,7 +313,10 @@ FRANK = PatientProfile(
     trial_gap=None,
     considered_therapy="adalimumab",
     considered_rxnorm="327361",
-    managing_provider="Dr. Okafor",
+    # Provider taken from source/documents/claims.json (CLM-CA-2026-90220), the
+    # source of truth for this member's care team. Distinct from Robert's
+    # Dr. Okafor: Frank is the California case. The id comes from PROVIDERS.
+    managing_provider="Dr. Ibrahim",
     enrollment_date="2025-03-01",
     plan_tier="specialty",
     guideline_id="CMG-PSA-2026.1",

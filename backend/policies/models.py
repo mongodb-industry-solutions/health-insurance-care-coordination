@@ -47,7 +47,10 @@ class Jurisdiction(BaseModel):
 
 
 class Policy(BaseModel):
-    policy_number: str = Field(alias="_id")
+    # Business key. Renamed from `policyNumber` for consistency with `memberId`,
+    # `planId`, `claimId` and `traceId`; `_id` is an ObjectId and is not a join
+    # key anywhere in the model.
+    policy_id: str = Field(alias="policyId")
     policy_type: Optional[str] = Field(default=None, alias="policyType")
     plan_id: str = Field(alias="planId")
     status: str
@@ -71,3 +74,32 @@ class Policy(BaseModel):
 class PoliciesListResponse(BaseModel):
     count: int
     policies: List[Policy]
+
+
+class EligibilityCheckResponse(BaseModel):
+    """Result of the first administrative gate — was coverage active on the date
+    of service? (Insurance Agent, step 1.)
+
+    `eligible: false` stops the process outright: no coverage lookup, no clinical
+    review. The agent logs the gate and closes the case itself as an
+    administrative eligibility denial, so `detail` is written as a plain-language
+    sentence fit to drop straight onto a trace step.
+    """
+    eligible: bool
+    # Machine-readable ground for a negative result; null when eligible.
+    # eligibility_lapsed | policy_not_yet_effective | policy_cancelled |
+    # policy_status_not_active
+    reason: Optional[str] = None
+    policy_id: str = Field(alias="policyId")
+    plan_id: Optional[str] = Field(default=None, alias="planId")
+    service_date: str = Field(alias="serviceDate")
+    policy_status: Optional[str] = Field(default=None, alias="policyStatus")
+    effective_period: Optional[EffectivePeriod] = Field(default=None, alias="effectivePeriod")
+    # An eligibility determination is a factual date/status comparison, not a
+    # judgement, so confidence is near-certain either way. It is reported so the
+    # caller can put a number on the trace step without inventing one.
+    confidence: float
+    detail: str
+
+    class Config:
+        populate_by_name = True

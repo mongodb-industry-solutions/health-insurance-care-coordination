@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from db.mdb import MongoDBConnector, get_connector
 from .service import PolicyService
-from .models import Policy, PoliciesListResponse
+from .models import EligibilityCheckResponse, Policy, PoliciesListResponse
 
 router = APIRouter(prefix="/api/policies", tags=["policies"])
 
@@ -20,6 +20,27 @@ async def get_policy(policy_id: str, service: PolicyService = Depends(get_policy
     if not doc:
         raise HTTPException(status_code=404, detail=f"Policy {policy_id} not found")
     return doc
+
+
+@router.get("/{policy_id}/eligibility", response_model=EligibilityCheckResponse)
+async def verify_eligibility_on_date(
+    policy_id: str,
+    service_date: str = None,
+    service: PolicyService = Depends(get_policy_service),
+):
+    """Insurance Agent, step 1: is coverage active on the requested service date?
+
+    The first administrative gate. `service_date` defaults to today. A negative
+    result stops the process before any coverage lookup or clinical review, and is
+    closable by the agent as an administrative determination.
+    """
+    try:
+        result = service.verify_eligibility_on_date(policy_id, service_date=service_date)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Policy {policy_id} not found")
+    return result
 
 
 @router.get("", response_model=PoliciesListResponse)

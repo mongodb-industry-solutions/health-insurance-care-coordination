@@ -79,3 +79,69 @@ async def list_all_claims(service: ClaimService = Depends(get_claim_service)):
     """Retrieve all claims."""
     claims = service.list_all_claims()
     return {"count": len(claims), "claims": claims}
+
+
+@router.post("", response_model=Claim)
+async def create_claim(
+    member_id: str,
+    procedure_code: str,
+    procedure_desc: str,
+    diagnosis_code: str,
+    diagnosis_display: str,
+    billed_amt: float,
+    claim_type: str = "specialty_pharmacy",
+    service_date: str = None,
+    service: ClaimService = Depends(get_claim_service),
+):
+    """Insurance Agent, step 0: open a claim for a requested service.
+
+    Opens in `pending` status with a server-generated `claimId`. `policyId` and the
+    treating provider are resolved from the member record, not taken from the
+    caller. Nothing is decided here.
+    """
+    try:
+        return service.create_claim(
+            member_id=member_id,
+            procedure_code=procedure_code,
+            procedure_desc=procedure_desc,
+            diagnosis_code=diagnosis_code,
+            diagnosis_display=diagnosis_display,
+            billed_amt=billed_amt,
+            claim_type=claim_type,
+            service_date=service_date,
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/{claim_id}/status", response_model=Claim)
+async def update_claim_status(
+    claim_id: str,
+    status: str,
+    paid_amt: float = 0,
+    member_owed: float = 0,
+    denial_reason: str = None,
+    linked_audit_trace_id: str = None,
+    service: ClaimService = Depends(get_claim_service),
+):
+    """Insurance Agent, step 9: apply a reached decision to its claim.
+
+    Guardrail: a claim cannot be set to `approved`, `approved_restricted` or `paid`
+    while its linked decision trace records a denial or is still undecided. A 400
+    here means that guardrail fired — resolve the trace rather than retrying.
+    """
+    try:
+        return service.update_claim_status(
+            claim_id=claim_id,
+            status=status,
+            paid_amt=paid_amt,
+            member_owed=member_owed,
+            denial_reason=denial_reason,
+            linked_audit_trace_id=linked_audit_trace_id,
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

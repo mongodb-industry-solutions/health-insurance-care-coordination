@@ -36,7 +36,7 @@ class NotificationService:
             raise ValueError(f"No authorization to notify for member {member_id}")
         trace = max(traces, key=lambda t: t.get("createdAt", ""))
 
-        member = self.member_repo.get_by_id(member_id) or {}
+        member = self.member_repo.get_by_key(member_id) or {}
         name = member.get("firstName") or "Member"
         service = trace.get("requested_service", "the requested treatment")
         status = trace.get("status", "pending")
@@ -75,11 +75,11 @@ class NotificationService:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         notification = {
             "_id": f"NOTIF-{uuid.uuid4().hex[:10]}",
-            "member_id": member_id,
-            "trace_id": trace["_id"],
+            "memberId": member_id,
+            "traceId": trace["traceId"],
             "status": status,
             "message": message,
-            "created_at": now,
+            "createdAt": now,
             "read": False,
         }
         self.repository.upsert(notification)

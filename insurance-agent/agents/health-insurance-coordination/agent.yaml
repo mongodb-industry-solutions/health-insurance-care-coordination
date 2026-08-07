@@ -1,0 +1,34 @@
+# Human-readable app slug used by Agentic Platform tooling.
+# `agentic create` should rewrite this when generating a new app from the template.
+name: health-insurance-coordination
+# Python import path to the Magenta SDK App instance.
+# Format: <module path>:<variable name>. This template exposes `app` from
+# src/insurance_agent/main.py.
+entrypoint: agent_health_insurance_coordination.main:app
+framework: langgraph
+config:
+    provider: anthropic
+    model: claude-opus-4-6
+network:
+  atlas_clusters:
+    - ist-shared.n0kts.mongodb.net
+  egress:
+    - fqdn: grove-gateway-prod.azure-api.net   # or api.anthropic.com if you call Anthropic directly
+      ports: [443]
+
+features:
+    guardrails: false
+    memory: false
+# Declare which secrets each workload may access. Platform-required secrets
+# (MONGODB_URI, VOYAGE_API_KEY) are always injected and do not need to be listed.
+
+required_secrets:
+    aer:
+        - ANTHROPIC_API_KEY
+        - ANTHROPIC_BASE_URL
+        - BACKEND_URL
+    tools:
+        invoke_llm:
+            - ANTHROPIC_API_KEY
+            - ANTHROPIC_BASE_URL
+            - BACKEND_URL

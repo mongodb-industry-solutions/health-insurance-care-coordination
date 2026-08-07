@@ -69,6 +69,11 @@ class Review(BaseModel):
     closed_at: Optional[str] = Field(default=None, alias="closedAt")
     # Medical director's closing rationale (Phase 3a) — part of the decision record.
     notes: Optional[str] = None
+    # The brief the Insurance Agent assembled when escalating: everything a
+    # physician needs to decide without re-reading the record. Stored on the trace
+    # rather than passed out-of-band so the escalation is auditable — a regulator
+    # asking "what was this reviewer shown?" has an answer.
+    case_brief: Optional[str] = Field(default=None, alias="caseBrief")
 
     class Config:
         populate_by_name = True
@@ -85,7 +90,7 @@ class LinkedTrace(BaseModel):
 
 
 class AuditTrace(BaseModel):
-    trace_id: str = Field(alias="_id")
+    trace_id: str = Field(alias="traceId")
     decision_type: str = Field(default="PRIOR_AUTHORIZATION", alias="decisionType")
     subject_ref: str = Field(alias="subjectRef")
     subject_type: str = Field(default="MEMBER", alias="subjectType")
@@ -123,3 +128,42 @@ class MemberTracesResponse(BaseModel):
 class PendingReviewResponse(BaseModel):
     count: int
     traces: List[AuditTrace]
+
+
+class TracesListResponse(BaseModel):
+    count: int
+    traces: List[AuditTrace]
+
+
+class RoutingDecisionResponse(BaseModel):
+    """The bounded-authority checkpoint's verdict (Insurance Agent, step 8).
+
+    This is the enforcement point for the demo's central claim: the agent assembles
+    the case, but it is never the final word on a clinical denial. The determination
+    is computed here, server-side, from the trace's own contents — not proposed by
+    the model and not left to the agent's judgement about what it is allowed to do.
+
+    `may_agent_close` and `must_escalate` are always opposites; both are returned
+    because a caller reading either one in isolation should not have to negate it.
+    """
+    may_agent_close: bool = Field(alias="mayAgentClose")
+    must_escalate: bool = Field(alias="mustEscalate")
+    # clinical_denial_requires_physician_closure | confidence_below_guideline_threshold
+    escalation_reason: Optional[str] = Field(default=None, alias="escalationReason")
+    decision: str
+    confidence: Optional[float] = None
+    confidence_threshold: float = Field(alias="confidenceThreshold")
+    # True when any reasoning step is tagged episodic or procedural. This is what
+    # makes a determination clinical rather than administrative, and therefore what
+    # decides who is allowed to close it.
+    clinical_reasoning_present: bool = Field(alias="clinicalReasoningPresent")
+    guideline_ref: Optional[str] = Field(default=None, alias="guidelineRef")
+    # How the guideline behind `confidence_threshold` was resolved: guideline_ref |
+    # condition | default. "default" means no guideline was found and the
+    # conservative 0.90 was used.
+    threshold_source: str = Field(alias="thresholdSource")
+    trace_id: str = Field(alias="traceId")
+    detail: str
+
+    class Config:
+        populate_by_name = True

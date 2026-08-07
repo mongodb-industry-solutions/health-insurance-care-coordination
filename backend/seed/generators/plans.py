@@ -8,49 +8,66 @@ adjudication math in the demo — the MVP demos the prior-authorization *decisio
 (covered? eligible? prior auth required?), not claims cost-share.
 
 `treatments[]` is the per-plan list of covered treatments and the protocol steps
-the plan pays for (closes the datamodel.txt §3 TODO). A coverage check resolves a
-treatment by `drug` + `condition` — matching how the agent names the considered
-therapy — and falls back to tier-level coverage when a therapy has no explicit
-treatment entry. `treatmentCode` (a J-code) also lines up with `claims.procedureCode`.
+the plan pays for. A coverage check resolves a treatment by `treatmentCode` +
+`condition` (exact) or by therapy name against `treatmentName` (substring) — see
+`plans/service.py::_resolve_treatment`. The final data model dropped the `drug`
+field that used to be the lookup key, so these documents carry none.
+`treatmentCode` (a J-code for biologics, an RxNorm code for conventional
+therapies) also lines up with `claims.procedureCode`.
+
+These definitions mirror `source/documents/plans.json` verbatim — that file is
+the source of truth for plan identifiers and benefit design, shared with the
+insurance-agent work. Each plan lists BOTH the conventional first-line therapy
+(standard tier) and the specialty biologic, so a step-therapy check can see the
+plan funded the prior therapy it requires.
 """
 
 
-def _biologic_steps(loading_label: str, maintenance_label: str, coinsurance):
-    """Standard specialty-biologic protocol: screening -> loading -> maintenance."""
+def _steps(*specs):
+    """Protocol steps as (code, name, covered, coinsurance, copay) tuples."""
     return [
-        {"stepCode": "BASELINE_LABS",
-         "stepName": "Baseline labs and TB/infection screening",
-         "covered": True, "coinsurance": coinsurance, "copay": None},
-        {"stepCode": "LOADING_DOSE", "stepName": loading_label,
-         "covered": True, "coinsurance": coinsurance, "copay": None},
-        {"stepCode": "MAINTENANCE_DOSE", "stepName": maintenance_label,
-         "covered": True, "coinsurance": coinsurance, "copay": None},
+        {"stepCode": code, "stepName": name, "covered": covered,
+         "coinsurance": coinsurance, "copay": copay}
+        for code, name, covered, coinsurance, copay in specs
     ]
 
 
-def _treatment(*, code, name, drug, rxnorm, condition, covered, coinsurance,
-               loading, maintenance):
+def _biologic_steps(loading_code, loading_label, maintenance_label, coinsurance,
+                    covered=True):
+    """Standard specialty-biologic protocol: screening -> loading -> maintenance."""
+    return _steps(
+        ("BASELINE_LABS", "Baseline labs and TB/infection screening",
+         covered, coinsurance, None),
+        (loading_code, loading_label, covered, coinsurance, None),
+        ("MAINTENANCE_DOSE", maintenance_label, covered, coinsurance, None),
+    )
+
+
+def _conventional(*, code, name, condition, copay, step_name):
+    """A standard-tier conventional therapy — the step-therapy prerequisite.
+
+    Never prior-auth gated: the whole point of step therapy is that the plan
+    already funds the first-line drug.
+    """
     return {
         "treatmentCode": code,
         "treatmentName": name,
-        "drug": drug,
-        "rxnorm": rxnorm,
         "condition": condition,
-        "tier": "specialty",
-        "covered": covered,
-        "priorAuthRequired": True,
-        # A non-covered treatment carries no funded steps.
-        "steps": _biologic_steps(loading, maintenance, coinsurance) if covered else [],
+        "tier": "standard",
+        "covered": True,
+        "priorAuthRequired": False,
+        "steps": _steps(("ORAL_THERAPY", step_name, True, None, copay)),
     }
 
 
 PLANS = [
     {
-        "_id": "PLAN-PPO-7731",
-        "planName": "PPO Specialty Care 7731",
+        "_id": "PLAN-PPO-SPEC-4471",
+        "planId": "PLAN-PPO-SPEC-4471",
+        "planName": "PPO Specialty Care 4471",
         "planType": "PPO",
         "network": "in_network_preferred",
-        "jurisdiction": "OH",
+        "jurisdiction": "multi_state",
         "eligibilityRules": {"requiresActiveStatus": True},
         "coverage": {
             "tiers": {
@@ -61,36 +78,63 @@ PLANS = [
                 },
                 "specialty": {
                     "covered": True, "priorAuthRequired": True,
-                    "coinsurance": 0.20, "copay": None, "deductible": 500,
+                    "coinsurance": 0.2, "copay": None, "deductible": 500,
                     "outOfPocketMax": 4000,
                 },
             },
             "excludedServices": ["cosmetic", "experimental"],
         },
+        # Methotrexate is listed once per condition it applies to: `treatmentCode`
+        # alone is not a unique key, so `condition` is always part of the match.
         "treatments": [
-            _treatment(
-                code="J3590", name="Secukinumab (Cosentyx) therapy",
-                drug="secukinumab", rxnorm="1656663", condition="M06.9",
-                covered=True, coinsurance=0.20,
-                loading="Loading dose (weeks 0-4)",
-                maintenance="Maintenance dosing (monthly, ongoing)",
+            _conventional(
+                code="6851", name="Methotrexate (conventional DMARD)",
+                condition="M06.9", copay=25,
+                step_name="Oral/subcutaneous methotrexate therapy",
             ),
-            _treatment(
-                code="J0135", name="Adalimumab (Humira) therapy",
-                drug="adalimumab", rxnorm="327361", condition="L40.50",
-                covered=True, coinsurance=0.20,
-                loading="Loading dose (weeks 0-1)",
-                maintenance="Maintenance dosing (biweekly, ongoing)",
+            _conventional(
+                code="6851", name="Methotrexate (conventional DMARD)",
+                condition="L40.50", copay=25,
+                step_name="Oral/subcutaneous methotrexate therapy",
             ),
+            {
+                "treatmentCode": "J3590",
+                "treatmentName": "Secukinumab (Cosentyx) therapy",
+                "condition": "M06.9",
+                "tier": "specialty",
+                "covered": True,
+                "priorAuthRequired": True,
+                "steps": _biologic_steps(
+                    "LOADING_DOSE", "Loading dose (weeks 0-4)",
+                    "Maintenance dosing (monthly, ongoing)", 0.2,
+                ),
+            },
+            {
+                "treatmentCode": "J0135",
+                "treatmentName": "Adalimumab (Humira) therapy",
+                "condition": "L40.50",
+                "tier": "specialty",
+                "covered": True,
+                "priorAuthRequired": True,
+                "steps": _biologic_steps(
+                    "LOADING_DOSE", "Loading dose (weeks 0-1)",
+                    "Maintenance dosing (biweekly, ongoing)", 0.2,
+                ),
+            },
         ],
+        "effectiveDate": "2025-01-01",
+        "renewalDate": "2027-01-01",
         "schemaVersion": "1.1",
+        "createdAt": "2025-01-01T00:00:00Z",
+        "updatedAt": "2026-07-27T00:00:00Z",
     },
     {
-        "_id": "PLAN-HMO-4420",
-        "planName": "HMO Specialty Care 4420",
+        "_id": "PLAN-HMO-SPEC-2290",
+        "planId": "PLAN-HMO-SPEC-2290",
+        "planName": "HMO Specialty Care 2290",
         "planType": "HMO",
         "network": "in_network_required",
-        "jurisdiction": "OH",
+        "jurisdiction": "NY",
         "eligibilityRules": {"requiresActiveStatus": True},
         "coverage": {
             "tiers": {
@@ -108,25 +152,43 @@ PLANS = [
             "excludedServices": ["cosmetic", "experimental"],
         },
         "treatments": [
-            _treatment(
-                code="J3357", name="Ustekinumab (Stelara) therapy",
-                drug="ustekinumab", rxnorm="1364454", condition="K50.90",
-                covered=True, coinsurance=0.25,
-                loading="Loading dose (week 0, weight-based IV induction)",
-                maintenance="Maintenance dosing (every 8 weeks, ongoing)",
+            _conventional(
+                code="1298944",
+                name="Azathioprine (conventional immunomodulator)",
+                condition="K50.90", copay=20,
+                step_name="Oral azathioprine therapy",
             ),
+            {
+                "treatmentCode": "J3357",
+                "treatmentName": "Ustekinumab (Stelara) therapy",
+                "condition": "K50.90",
+                "tier": "specialty",
+                "covered": True,
+                "priorAuthRequired": True,
+                # Ustekinumab induces with a weight-based IV dose rather than a
+                # loading dose, so the middle step differs from the other biologics.
+                "steps": _biologic_steps(
+                    "INDUCTION_DOSE", "Weight-based IV induction dose",
+                    "Maintenance dosing (every 8 weeks, ongoing)", 0.25,
+                ),
+            },
         ],
+        "effectiveDate": "2025-01-01",
+        "renewalDate": "2027-01-01",
         "schemaVersion": "1.1",
+        "createdAt": "2025-01-01T00:00:00Z",
+        "updatedAt": "2026-07-27T00:00:00Z",
     },
     # Standard-only plan: specialty tier NOT covered, and the specialty biologic is
     # explicitly listed as covered:false so the benefit denial is data-driven (not
     # merely inferred from the tier flag).
     {
-        "_id": "PLAN-HMO-STD-3300",
-        "planName": "HMO Standard 3300",
-        "planType": "HMO",
-        "network": "in_network_required",
-        "jurisdiction": "OH",
+        "_id": "PLAN-PPO-STD-1100",
+        "planId": "PLAN-PPO-STD-1100",
+        "planName": "PPO Standard Care 1100",
+        "planType": "PPO",
+        "network": "in_network_preferred",
+        "jurisdiction": "multi_state",
         "eligibilityRules": {"requiresActiveStatus": True},
         "coverage": {
             "tiers": {
@@ -135,23 +197,44 @@ PLANS = [
                     "coinsurance": None, "copay": 30, "deductible": 0,
                     "outOfPocketMax": None,
                 },
+                # priorAuthRequired is null, not false: an uncovered tier has no
+                # prior-auth question to answer, and false would wrongly read as
+                # "covered without prior auth".
                 "specialty": {
-                    "covered": False, "priorAuthRequired": True,
+                    "covered": False, "priorAuthRequired": None,
                     "coinsurance": None, "copay": None, "deductible": None,
                     "outOfPocketMax": None,
                 },
             },
-            "excludedServices": ["cosmetic", "experimental", "specialty_biologics"],
+            "excludedServices": [
+                "cosmetic", "experimental", "specialty_tier_biologics",
+            ],
         },
         "treatments": [
-            _treatment(
-                code="J3590", name="Secukinumab (Cosentyx) therapy",
-                drug="secukinumab", rxnorm="1656663", condition="M06.9",
-                covered=False, coinsurance=None,
-                loading="Loading dose (weeks 0-4)",
-                maintenance="Maintenance dosing (monthly, ongoing)",
+            _conventional(
+                code="6851", name="Methotrexate (conventional DMARD)",
+                condition="M06.9", copay=30,
+                step_name="Oral/subcutaneous methotrexate therapy",
             ),
+            {
+                "treatmentCode": "J3590",
+                "treatmentName": "Secukinumab (Cosentyx) therapy",
+                "condition": "M06.9",
+                "tier": "specialty",
+                "covered": False,
+                "priorAuthRequired": None,
+                # Steps are listed but unfunded, so a coverage check can say which
+                # protocol was requested and that none of it is paid for.
+                "steps": _biologic_steps(
+                    "LOADING_DOSE", "Loading dose (weeks 0-4)",
+                    "Maintenance dosing (monthly, ongoing)", None, covered=False,
+                ),
+            },
         ],
+        "effectiveDate": "2025-01-01",
+        "renewalDate": "2027-01-01",
         "schemaVersion": "1.1",
+        "createdAt": "2025-01-01T00:00:00Z",
+        "updatedAt": "2026-07-27T00:00:00Z",
     },
 ]

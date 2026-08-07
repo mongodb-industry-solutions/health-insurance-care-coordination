@@ -90,6 +90,76 @@ def register(app: App) -> None:
             return json.dumps({"error": f"Failed to retrieve member context: {str(e)}"})
 
     @app.tool(is_local=False)
+    def get_open_case(member_id: str) -> str:
+        """Read the member's open case — call this FIRST for any authorization request.
+
+        The insurance agent opens a case by flipping the member's pending action to
+        `in_progress` and attaching a trace id; it does not message this agent. This
+        is how you pick that case up given nothing but a member id. Returns the
+        therapy the referring physician proposed and the `trace_id` your reasoning
+        steps belong on.
+
+        Use `proposed_treatment` as the input to `match_clinical_concept`. Do NOT
+        use `related_diagnosis_code` as though the diagnosis were established — it is
+        the physician's own claim about which condition the drug treats, and
+        confirming it independently is exactly what Step 3 is for. Compare the two
+        afterwards if you like; a disagreement is worth reporting.
+
+        If `has_open_case` is false there is nothing to process: say so rather than
+        inventing a request.
+
+        Args:
+            member_id: The member's unique ID (e.g., MBR-2026-44109).
+        """
+        try:
+            backend_url = _get_backend_url()
+            response = requests.get(
+                f"{backend_url}/api/members/{member_id}/open-case",
+                timeout=5,
+            )
+            if response.status_code == 404:
+                return json.dumps({"error": f"Member {member_id} not found"})
+            response.raise_for_status()
+            return json.dumps(response.json())
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Failed to retrieve open case: {str(e)}"})
+
+    @app.tool(is_local=False)
+    def match_clinical_concept(member_id: str, requested_treatment: str) -> str:
+        """Step 3 (semantic memory): confirm the requested therapy corresponds to a
+        condition already documented on the member's record.
+
+        The referring physician names a drug; the record carries ICD-10 codes.
+        This bridges the two through the clinical guideline that classifies the
+        drug, and returns a confidence-scored match plus the diagnosis code to
+        carry into Step 4.
+
+        Call this before `get_applicable_guideline` — this is what tells you which
+        condition code to look the guideline up by. A `matched: false` result means
+        the concept is unconfirmed: do not proceed as though the diagnosis is
+        established, and let the low confidence carry through to Step 7.
+
+        Args:
+            member_id: The member's unique ID (e.g., MBR-2026-44109).
+            requested_treatment: The therapy being requested. The bare drug name
+                (e.g. "secukinumab") or the canonical service string
+                (e.g. "biologic therapy - secukinumab") both work.
+        """
+        try:
+            backend_url = _get_backend_url()
+            response = requests.get(
+                f"{backend_url}/api/members/{member_id}/concept-match",
+                params={"requested_treatment": requested_treatment},
+                timeout=5,
+            )
+            if response.status_code == 404:
+                return json.dumps({"error": f"Member {member_id} not found"})
+            response.raise_for_status()
+            return json.dumps(response.json())
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Failed to match clinical concept: {str(e)}"})
+
+    @app.tool(is_local=False)
     def get_applicable_guideline(condition_code: str, member_id: str) -> str:
         """Retrieve the latest clinical guideline for a condition.
 
@@ -118,6 +188,83 @@ def register(app: App) -> None:
             return json.dumps({"error": f"Failed to retrieve guideline: {str(e)}"})
 
     @app.tool(is_local=False)
+    def classify_treatment(condition_code: str, requested_treatment: str) -> str:
+        """Step 4 (taxonomic memory): classify the requested treatment by category.
+
+        Returns the treatment's class (e.g. biologic), coverage tier, whether prior
+        authorization is required, and whether step-therapy criteria apply — plus the
+        guideline's confidence threshold, which Step 7 is measured against.
+
+        Call this after `match_clinical_concept`, using the diagnosis code it
+        confirmed. A drug the guideline never enumerated is still classified from its
+        category, but comes back with `inferred: true` and lower confidence — when
+        that happens, say so in your assessment rather than presenting the tier as an
+        established fact, and carry the reduced confidence into Step 7.
+
+        Args:
+            condition_code: ICD-10 diagnosis code confirmed in Step 3 (e.g. "M06.9").
+            requested_treatment: The therapy being classified. The bare drug name
+                ("secukinumab") or the canonical service string
+                ("biologic therapy - secukinumab") both work.
+        """
+        try:
+            backend_url = _get_backend_url()
+            response = requests.get(
+                f"{backend_url}/api/guidelines/condition/{condition_code}/classify",
+                params={"requested_treatment": requested_treatment},
+                timeout=5,
+            )
+            if response.status_code == 404:
+                return json.dumps(
+                    {"error": f"No guideline found for condition {condition_code}"}
+                )
+            response.raise_for_status()
+            return json.dumps(response.json())
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Failed to classify treatment: {str(e)}"})
+
+    @app.tool(is_local=False)
+    def evaluate_step_therapy(
+        condition_code: str, documented_drug: str, documented_months: float
+    ) -> str:
+        """Step 6 (procedural memory): apply the guideline's step-therapy criteria.
+
+        Answers the one question Step 6 exists to answer: does the trial on file meet
+        the minimum the guideline requires? Returns `satisfied` true or false, and
+        distinguishes a trial that is too short from one that is of the wrong drug.
+
+        Pass `documented_months` as the `effective_trial_months` from Step 5 — not the
+        record's `duration_months`, which understates trials still in progress.
+
+        A `satisfied: false` result does NOT end the process. Continue to Step 7: the
+        recommendation still has to go through confidence aggregation and the
+        escalation check, and you have no authority to close a clinical denial.
+
+        Args:
+            condition_code: ICD-10 diagnosis code confirmed in Step 3 (e.g. "M06.9").
+            documented_drug: The prior therapy reviewed in Step 5 (e.g. "Methotrexate").
+            documented_months: effective_trial_months from Step 5.
+        """
+        try:
+            backend_url = _get_backend_url()
+            response = requests.get(
+                f"{backend_url}/api/guidelines/condition/{condition_code}/step-therapy",
+                params={
+                    "documented_drug": documented_drug,
+                    "documented_months": documented_months,
+                },
+                timeout=5,
+            )
+            if response.status_code == 404:
+                return json.dumps(
+                    {"error": f"No guideline found for condition {condition_code}"}
+                )
+            response.raise_for_status()
+            return json.dumps(response.json())
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Failed to evaluate step therapy: {str(e)}"})
+
+    @app.tool(is_local=False)
     def find_comparable_claims(service: str, diagnosis: str, member_id: str) -> str:
         """Find prior adjudicated claims with the same service and diagnosis.
 
@@ -125,8 +272,12 @@ def register(app: App) -> None:
         treatments for similar presentations. Used to inform authorization confidence.
 
         Args:
-            service: Service description (e.g., "biologic therapy - secukinumab").
-            diagnosis: ICD-10 diagnosis code.
+            service: The therapy being sought. Prefer the canonical form
+                "biologic therapy - <drug>" (e.g. "biologic therapy - secukinumab"),
+                but the drug name alone (e.g. "secukinumab") also matches.
+                Always name the specific drug — never a generic phrase like
+                "biologic therapy" on its own.
+            diagnosis: ICD-10 diagnosis code (e.g. "M06.9"), not the display name.
             member_id: The member whose case this is for (excluded from results; audits the read).
         """
         try:
@@ -144,6 +295,40 @@ def register(app: App) -> None:
             return json.dumps(response.json())
         except requests.RequestException as e:
             return json.dumps({"error": f"Failed to find comparable claims: {str(e)}"})
+
+    @app.tool(is_local=False)
+    def review_trial_history(member_id: str, drug: str) -> str:
+        """Step 5 (episodic memory): review the member's trial of the required therapy.
+
+        Derives the effective trial duration from the member's actual pharmacy fills,
+        flags any interruption in refill cadence, and reports whether a clinical note
+        explains it. This is the number Step 6 evaluates — prefer it over
+        `duration_months` on the record, which is often stale and understates a trial
+        the member is still refilling.
+
+        Read `effective_trial_months` as the answer. If `anomaly_detected` is true and
+        `anomaly_explained` is false, only the longest uninterrupted run was credited
+        and confidence is reduced — report that plainly and lean toward human review
+        rather than crediting the full span.
+
+        Args:
+            member_id: The member's unique ID (e.g., MBR-2026-44109).
+            drug: The required prior therapy to review, from Step 4's
+                step_therapy_drug (e.g. "Methotrexate").
+        """
+        try:
+            backend_url = _get_backend_url()
+            response = requests.get(
+                f"{backend_url}/api/members/{member_id}/trial-history",
+                params={"drug": drug},
+                timeout=5,
+            )
+            if response.status_code == 404:
+                return json.dumps({"error": f"Member {member_id} not found"})
+            response.raise_for_status()
+            return json.dumps(response.json())
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Failed to review trial history: {str(e)}"})
 
     @app.tool(is_local=False)
     def detect_refill_gaps(member_id: str, drug: str = "") -> str:
@@ -219,6 +404,154 @@ def register(app: App) -> None:
             return json.dumps(response.json())
         except requests.RequestException as e:
             return json.dumps({"error": f"Failed to resolve refill gap: {str(e)}"})
+
+    @app.tool(is_local=False)
+    def compute_recommendation(
+        condition_code: str,
+        step_confidences: str,
+        criteria_satisfied: bool,
+        coverage_restriction: str = "none",
+    ) -> str:
+        """Step 7: aggregate the reasoning steps and propose a decision.
+
+        Do NOT compute this yourself. The aggregation is deterministic and documented
+        because the bounded-authority gate keys off the number — inventing it would make
+        the audit trail indefensible.
+
+        Returns the proposed decision (approved / approved_restricted / denied), the
+        aggregate confidence, and whether it clears the guideline's threshold.
+
+        This is a RECOMMENDATION ONLY. You do not close the case, and you must not
+        describe the outcome as final. A denial in particular can only be closed by a
+        medical director.
+
+        Args:
+            condition_code: ICD-10 diagnosis code confirmed in Step 3 (e.g. "M06.9").
+            step_confidences: Comma-separated confidences from the prior steps, in
+                order — Step 3 match, Step 4 classification, Step 5 trial review,
+                Step 6 step therapy. E.g. "0.98,0.97,0.95,0.90".
+            criteria_satisfied: The `satisfied` value from Step 6.
+            coverage_restriction: "partial" if Step 2 flagged partial coverage,
+                otherwise "none".
+        """
+        try:
+            backend_url = _get_backend_url()
+            response = requests.get(
+                f"{backend_url}/api/guidelines/condition/{condition_code}/recommendation",
+                params={
+                    "step_confidences": step_confidences,
+                    "criteria_satisfied": criteria_satisfied,
+                    "coverage_restriction": coverage_restriction,
+                },
+                timeout=5,
+            )
+            if response.status_code == 404:
+                return json.dumps(
+                    {"error": f"No guideline found for condition {condition_code}"}
+                )
+            response.raise_for_status()
+            return json.dumps(response.json())
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Failed to compute recommendation: {str(e)}"})
+
+    @app.tool(is_local=False)
+    def record_reasoning_step(
+        trace_id: str,
+        memory_type: str,
+        name: str,
+        detail: str,
+        confidence: float,
+    ) -> str:
+        """Record one reasoning step on the case's audit trace.
+
+        Call this immediately after each of Steps 3, 4, 5 and 6, using the `detail`
+        and `confidence` that step's tool returned — copy them exactly, never
+        paraphrase the detail or round the number. This is what turns your reasoning
+        into an auditable record instead of chat output, and it is what a second agent
+        reads to know a clinical judgement was made.
+
+        Tagging a step `episodic` or `procedural` marks the whole determination as
+        clinical, which removes any agent's authority to close it. That is correct for
+        Steps 5 and 6 and must not be softened to avoid an escalation.
+
+        Args:
+            trace_id: From get_open_case in Step 1. If it is null, Step 0 has not run
+                and there is nothing to write to — say so rather than proceeding.
+            memory_type: semantic (Step 3), taxonomic (Step 4), episodic (Step 5),
+                procedural (Step 6).
+            name: Short label, e.g. "concept_match", "trial_review".
+            detail: The `detail` string the step's tool returned, verbatim.
+            confidence: The `confidence` the step's tool returned.
+        """
+        try:
+            backend_url = _get_backend_url()
+            response = requests.post(
+                f"{backend_url}/api/audit/traces/{trace_id}/steps",
+                params={
+                    "memory_type": memory_type,
+                    "name": name,
+                    "detail": detail,
+                    "confidence": confidence,
+                },
+                timeout=5,
+            )
+            if response.status_code == 404:
+                return json.dumps({"error": f"Trace {trace_id} not found"})
+            if response.status_code == 400:
+                try:
+                    detail_msg = response.json().get("detail", "invalid request")
+                except ValueError:
+                    detail_msg = "invalid request"
+                return json.dumps({"error": f"Step not recorded: {detail_msg}"})
+            response.raise_for_status()
+            return json.dumps(response.json())
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Failed to record reasoning step: {str(e)}"})
+
+    @app.tool(is_local=False)
+    def record_recommendation(
+        trace_id: str, decision: str, rationale: str, confidence: float
+    ) -> str:
+        """Record the proposed outcome on the trace — the last thing you do in Step 7.
+
+        Pass the `recommendation`, `rationale` and `confidence` exactly as
+        `compute_recommendation` returned them. Do not substitute your own judgement
+        for the computed decision, and do not adjust the confidence.
+
+        This records a RECOMMENDATION. It does not close the case and does not decide
+        who may: that is a separate bounded-authority check the insurance agent runs
+        against this outcome. Never describe the case as approved, denied or finished
+        after calling this — it is now awaiting routing.
+
+        Args:
+            trace_id: From get_open_case in Step 1.
+            decision: approved, approved_restricted, denied or pending.
+            rationale: The plain-language rationale from compute_recommendation.
+            confidence: The aggregate confidence from compute_recommendation.
+        """
+        try:
+            backend_url = _get_backend_url()
+            response = requests.post(
+                f"{backend_url}/api/audit/traces/{trace_id}/recommendation",
+                params={
+                    "decision": decision,
+                    "rationale": rationale,
+                    "confidence": confidence,
+                },
+                timeout=5,
+            )
+            if response.status_code == 404:
+                return json.dumps({"error": f"Trace {trace_id} not found"})
+            if response.status_code == 400:
+                try:
+                    detail_msg = response.json().get("detail", "invalid request")
+                except ValueError:
+                    detail_msg = "invalid request"
+                return json.dumps({"error": f"Recommendation not recorded: {detail_msg}"})
+            response.raise_for_status()
+            return json.dumps(response.json())
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Failed to record recommendation: {str(e)}"})
 
     @app.tool(is_local=False)
     def get_member_authorizations(member_id: str) -> str:
