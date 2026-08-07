@@ -647,10 +647,15 @@ class MemberService:
         gap stays explained — `review_trial_history` reads a `gap_reviewed` entry back
         as documentation on a later run. Generic: no condition or drug is hardcoded.
 
-        **Idempotent per drug.** A re-run replaces this drug's existing `gap_reviewed`
-        entry rather than appending a second one. The same gap reviewed twice is one
-        conclusion re-stated, not two findings, and an appending write would grow the
-        record without bound across replays of the same case.
+        **Idempotent per drug.** A re-run leaves exactly one `gap_reviewed` entry for
+        the drug, as the newest one. The same gap reviewed twice is one conclusion
+        re-stated, not two findings.
+
+        Every prior entry for the drug is dropped, not just the one being superseded,
+        so a record carrying duplicates from before this was idempotent is repaired on
+        the next write. That matters because `review_trial_history` reads
+        `prior_reviews[-1]`: leaving an older duplicate in place after it would keep
+        serving a stale conclusion no re-run could displace.
 
         Returns the updated member, or None if it does not exist.
         """
@@ -674,16 +679,20 @@ class MemberService:
         if related_note:
             entry["related_note"] = related_note
 
-        responses = clinical.setdefault("treatment_responses", [])
         wanted = (drug or "").strip().lower()
-        for index, existing in enumerate(responses):
-            if (existing.get("outcome") or "") == "gap_reviewed" and (
-                existing.get("drug") or ""
-            ).strip().lower() == wanted:
-                responses[index] = entry
-                break
-        else:
-            responses.append(entry)
+        kept = [
+            r
+            for r in clinical.get("treatment_responses") or []
+            if not (
+                (r.get("outcome") or "") == "gap_reviewed"
+                and (r.get("drug") or "").strip().lower() == wanted
+            )
+        ]
+        # Appended last, so `prior_reviews[-1]` reads this conclusion and not an older
+        # one. Entries for other drugs, and this drug's clinician-written responses,
+        # keep their original order.
+        kept.append(entry)
+        clinical["treatment_responses"] = kept
 
         member["updatedAt"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         self.repository.upsert(member)
