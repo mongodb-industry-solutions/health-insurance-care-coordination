@@ -225,7 +225,7 @@ def register(app: App) -> None:
 
     @app.tool(is_local=False)
     def evaluate_step_therapy(
-        condition_code: str, documented_drug: str, documented_months: float
+        condition_code: str, documented_drug: str, effective_trial_months: float
     ) -> str:
         """Step 6 (procedural memory): apply the guideline's step-therapy criteria.
 
@@ -233,8 +233,10 @@ def register(app: App) -> None:
         the minimum the guideline requires? Returns `satisfied` true or false, and
         distinguishes a trial that is too short from one that is of the wrong drug.
 
-        Pass `documented_months` as the `effective_trial_months` from Step 5 — not the
-        record's `duration_months`, which understates trials still in progress.
+        Pass `effective_trial_months` straight through from Step 5. It is the only
+        duration this step accepts — not `documented_months`, which can lag a trial
+        still being refilled, and not `longest_continuous_months`, which is correct
+        only when a gap was left unexplained.
 
         A `satisfied: false` result does NOT end the process. Continue to Step 7: the
         recommendation still has to go through confidence aggregation and the
@@ -243,7 +245,7 @@ def register(app: App) -> None:
         Args:
             condition_code: ICD-10 diagnosis code confirmed in Step 3 (e.g. "M06.9").
             documented_drug: The prior therapy reviewed in Step 5 (e.g. "Methotrexate").
-            documented_months: effective_trial_months from Step 5.
+            effective_trial_months: `effective_trial_months` from review_trial_history.
         """
         try:
             backend_url = _get_backend_url()
@@ -251,7 +253,10 @@ def register(app: App) -> None:
                 f"{backend_url}/api/guidelines/condition/{condition_code}/step-therapy",
                 params={
                     "documented_drug": documented_drug,
-                    "documented_months": documented_months,
+                    # The backend query param keeps its original name; only the
+                    # tool-facing argument is renamed, to stop the model reaching for
+                    # the record's documented figure instead of the effective one.
+                    "documented_months": effective_trial_months,
                 },
                 timeout=5,
             )
@@ -265,51 +270,33 @@ def register(app: App) -> None:
             return json.dumps({"error": f"Failed to evaluate step therapy: {str(e)}"})
 
     @app.tool(is_local=False)
-    def find_comparable_claims(service: str, diagnosis: str, member_id: str) -> str:
-        """Find prior adjudicated claims with the same service and diagnosis.
-
-        Returns comparable cases (episodic memory) showing outcomes of similar
-        treatments for similar presentations. Used to inform authorization confidence.
-
-        Args:
-            service: The therapy being sought. Prefer the canonical form
-                "biologic therapy - <drug>" (e.g. "biologic therapy - secukinumab"),
-                but the drug name alone (e.g. "secukinumab") also matches.
-                Always name the specific drug — never a generic phrase like
-                "biologic therapy" on its own.
-            diagnosis: ICD-10 diagnosis code (e.g. "M06.9"), not the display name.
-            member_id: The member whose case this is for (excluded from results; audits the read).
-        """
-        try:
-            backend_url = _get_backend_url()
-            response = requests.get(
-                f"{backend_url}/api/claims/comparable",
-                params={
-                    "service_name": service,
-                    "diagnosis": diagnosis,
-                    "member_id": member_id,  # excluded from own results
-                },
-                timeout=5,
-            )
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to find comparable claims: {str(e)}"})
-
-    @app.tool(is_local=False)
     def review_trial_history(member_id: str, drug: str) -> str:
         """Step 5 (episodic memory): review the member's trial of the required therapy.
 
         Derives the effective trial duration from the member's actual pharmacy fills,
         flags any interruption in refill cadence, and reports whether a clinical note
-        explains it. This is the number Step 6 evaluates — prefer it over
-        `duration_months` on the record, which is often stale and understates a trial
-        the member is still refilling.
+        explains it.
 
-        Read `effective_trial_months` as the answer. If `anomaly_detected` is true and
-        `anomaly_explained` is false, only the longest uninterrupted run was credited
-        and confidence is reduced — report that plainly and lean toward human review
-        rather than crediting the full span.
+        `effective_trial_months` is the answer, and the only figure Step 6 evaluates.
+        The other durations are context, and each means something specific:
+
+        * `documented_months` — what someone wrote on the record. It can lag a trial
+          the member is still refilling, so it is not authoritative. It often equals
+          `effective_trial_months`; do not assume the two disagree.
+        * `longest_continuous_months` — the longest uninterrupted run of fills. This
+          is credited INSTEAD of the full span only when a gap is unexplained. When
+          the gap is explained it is not the trial duration, and reporting it as one
+          understates the trial.
+        * `observed_span_months` — first fill to last, gaps included.
+
+        `gap_days` measures the interval between consecutive fills, NOT days the
+        member was off the drug: one missed monthly refill shows up as a ~60-day
+        interval. Read `approx_missed_fills` alongside it, and never describe a gap as
+        time without medication.
+
+        If `anomaly_detected` is true and `anomaly_explained` is false, only
+        `longest_continuous_months` was credited and confidence is reduced — report
+        that plainly and lean toward human review rather than crediting the full span.
 
         Args:
             member_id: The member's unique ID (e.g., MBR-2026-44109).
@@ -332,12 +319,16 @@ def register(app: App) -> None:
 
     @app.tool(is_local=False)
     def detect_refill_gaps(member_id: str, drug: str = "") -> str:
-        """Detect breaks in a member's medication refill cadence.
+        """Step 5b: see the specific breaks in a member's refill cadence.
 
-        Analyzes the pharmacy claims timeline and returns any gaps where the
-        interval between consecutive fills is longer than expected (a possible
-        missed refill). Used by the verification agent to spot a gap before it is
-        mistaken for a discontinuation.
+        Analyzes the pharmacy claims timeline and returns any interval between
+        consecutive fills that is longer than expected. Call it after
+        `review_trial_history` reports `anomaly_detected`, to see the individual gaps
+        before deciding whether documentation explains them.
+
+        `gap_days` is the interval between fills, NOT days the member was off the
+        drug: one missed monthly refill reads as roughly 60 days. Report it together
+        with `approx_missed_fills`, and never call it time without medication.
 
         Args:
             member_id: The member's unique ID.
@@ -366,19 +357,26 @@ def register(app: App) -> None:
         conclusion: str,
         related_note: str = "",
     ) -> str:
-        """Attach a verification conclusion about a refill gap to the member record.
+        """Step 5b: record that a documented note explains a refill gap.
 
-        Call this after you have reviewed a detected refill gap and reasoned about
-        whether it is explained (e.g. a documented medication hold, not a
-        discontinuation). Your `conclusion` text is recorded as a treatment_response
-        so the effective trial stands and the case proceeds.
+        Call this ONLY when you found a clinical note that genuinely accounts for the
+        gap — a documented medication hold, not a discontinuation. Your `conclusion`
+        is stored as a treatment_response on the member's record, which is what makes
+        the full trial stand for this and any later case.
+
+        Do NOT call it for an unexplained gap. There is nothing to record: only the
+        longest uninterrupted run is credited, and the case leans to human review.
+        Calling it anyway asserts an explanation you do not have.
 
         Args:
             member_id: The member's unique ID.
             drug: The drug whose trial had the gap (e.g. "Methotrexate").
-            effective_trial_months: The effective trial duration after accounting for the gap.
-            conclusion: Your reasoning about why the gap does or does not invalidate the trial.
-            related_note: The note_id of the clinical note that explains the gap (e.g. "NOTE-44109-hold").
+            effective_trial_months: `effective_trial_months` from review_trial_history —
+                the duration that stands once the gap is explained. Whole months.
+            conclusion: Your own reasoning for why the gap does not invalidate the
+                trial. Write it yourself; the system only stores it.
+            related_note: The note_id of the clinical note that explains the gap
+                (e.g. "NOTE-44109-hold"). Never invent one.
         """
         try:
             backend_url = _get_backend_url()
@@ -475,8 +473,8 @@ def register(app: App) -> None:
         Steps 5 and 6 and must not be softened to avoid an escalation.
 
         Args:
-            trace_id: From get_open_case in Step 1. If it is null, Step 0 has not run
-                and there is nothing to write to — say so rather than proceeding.
+            trace_id: From get_open_case at case pickup. If it is null, Step 0 has not
+                run and there is nothing to write to — say so rather than proceeding.
             memory_type: semantic (Step 3), taxonomic (Step 4), episodic (Step 5),
                 procedural (Step 6).
             name: Short label, e.g. "concept_match", "trial_review".
@@ -524,7 +522,7 @@ def register(app: App) -> None:
         after calling this — it is now awaiting routing.
 
         Args:
-            trace_id: From get_open_case in Step 1.
+            trace_id: From get_open_case at case pickup.
             decision: approved, approved_restricted, denied or pending.
             rationale: The plain-language rationale from compute_recommendation.
             confidence: The aggregate confidence from compute_recommendation.
@@ -574,77 +572,3 @@ def register(app: App) -> None:
             return json.dumps(response.json())
         except requests.RequestException as e:
             return json.dumps({"error": f"Failed to retrieve authorizations: {str(e)}"})
-
-    @app.tool(is_local=False)
-    def file_authorization(member_id: str, requested_service: str) -> str:
-        """File a formal prior-authorization request (creates a pending authorization).
-
-        Call this before processing a decision. The request is a confirmation of the
-        case already assembled; it does not decide anything.
-
-        Args:
-            member_id: The member's unique ID.
-            requested_service: The service requested (e.g. "biologic therapy - secukinumab").
-        """
-        try:
-            backend_url = _get_backend_url()
-            response = requests.post(
-                f"{backend_url}/api/audit/traces/file",
-                params={"member_id": member_id, "requested_service": requested_service},
-                timeout=5,
-            )
-            if response.status_code == 404:
-                return json.dumps({"error": f"Member {member_id} not found"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to file authorization: {str(e)}"})
-
-    @app.tool(is_local=False)
-    def notify_member(member_id: str) -> str:
-        """Send the member a plain-language notification about their latest decision.
-
-        Args:
-            member_id: The member's unique ID.
-        """
-        try:
-            backend_url = _get_backend_url()
-            response = requests.post(
-                f"{backend_url}/api/notifications/notify",
-                params={"member_id": member_id},
-                timeout=5,
-            )
-            if response.status_code == 400:
-                return json.dumps({"error": response.json().get("detail", "Bad request")})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to notify member: {str(e)}"})
-
-    @app.tool(is_local=False)
-    def process_authorization(member_id: str) -> str:
-        """Process the member's pending authorization and return the decision.
-
-        The system computes the decision from the member's current record, the
-        applicable guideline, and comparable precedent, applies bounded authority
-        (auto-approve only if confidence meets the guideline threshold; denials and
-        low-confidence cases route to a medical director), records the decision
-        trace, and logs the decision. Call this after the case has been assembled
-        and verified, and a formal request has been filed.
-
-        Args:
-            member_id: The member's unique ID (must have a pending authorization).
-        """
-        try:
-            backend_url = _get_backend_url()
-            response = requests.post(
-                f"{backend_url}/api/audit/traces/process",
-                params={"member_id": member_id},
-                timeout=10,
-            )
-            if response.status_code == 400:
-                return json.dumps({"error": response.json().get("detail", "Bad request")})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to process authorization: {str(e)}"})

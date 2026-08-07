@@ -99,8 +99,8 @@ def build_clinical_notes(profile: PatientProfile) -> list[dict]:
     """Narrative visit notes accrued during Phase 0.
 
     Content lives on the member (not the audit log). Includes the diagnosis note
-    and, when the trial had a documented hold, the medication-hold note that
-    Phase 2's verification agent later retrieves to explain the refill gap.
+    and, when the trial had a documented hold, the medication-hold note that the
+    care-coordination agent later retrieves in Step 5b to explain the refill gap.
     """
     _, dx_date, trial_start = _trial_dates(profile)
     notes = [

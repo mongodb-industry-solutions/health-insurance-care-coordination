@@ -288,7 +288,7 @@ class ClaimService:
         cadence_days: int = 30,
         gap_factor: float = 1.5,
     ) -> dict:
-        """Phase 2, step 1: find breaks in medication refill cadence.
+        """Step 5b: find breaks in medication refill cadence.
 
         Deterministic interval analysis over the member's pharmacy claims (that's
         where fill dates live — not medications/treatment_responses). For each drug,

@@ -118,357 +118,31 @@ class AuditService:
         self.guideline_repo = GuidelineRepository(connector)
         self.claim_service = ClaimService(connector)
 
-    # --- lifecycle -----------------------------------------------------------
+    @staticmethod
+    def _resolve_therapy(trace: dict, member: dict) -> str:
+        """Name the therapy a trace approved, for the member's care plan.
 
-    def file_trace(self, member_id: str, requested_service: str) -> dict:
-        """Phase 3, step 1: file a formal prior-authorization request.
+        Three sources, most to least authoritative. `requested_service` is what the
+        field is nominally for, but nothing currently writes it — the Insurance
+        Agent's step 0 does not pass it — so in practice the pending action is what
+        answers. Reading it by `linkedAuditTraceId` keeps the right answer when a
+        member has more than one action.
 
-        Creates a `pending` trace — no steps/outcome/review yet; those are filled
-        when it is processed. This is the EHR/provider filing the request, not an
-        agent decision. Raises ValueError if the member does not exist.
+        Returns "" when no source names a therapy, so callers can decline to write
+        rather than blanking a care plan with an empty string.
         """
-        if not self.member_repo.get_by_key(member_id):
-            raise ValueError(f"Member {member_id} not found")
+        requested = (trace.get("requested_service") or "").strip()
+        if requested:
+            return requested.replace("biologic therapy - ", "")
 
-        trace_id = f"TRC-{uuid.uuid4().hex[:10].upper()}"
-        now = _now()
-        trace = {
-            "_id": trace_id,
-            "traceId": trace_id,
-            "decisionType": "PRIOR_AUTHORIZATION",
-            "subjectRef": member_id,
-            "subjectType": "MEMBER",
-            "requested_service": requested_service,
-            "status": "pending",
-            "audit": {
-                "triggeredBy": "system:ehr_integration",
-                "triggeredAt": now,
-                "reviewRequired": False,
-                "regulatoryFlags": ["CMS-PA-RULE"],
-                "retentionYears": 7,
-            },
-            "contextSnapshot": None,
-            "steps": [],
-            "outcome": None,
-            "review": None,
-            "linkedTraces": [],
-            "createdAt": now,
-            "updatedAt": now,
-        }
-        self.repository.upsert(trace)
-        return trace
+        trace_id = trace.get("traceId")
+        for action in member.get("pendingActions") or []:
+            if action.get("linkedAuditTraceId") == trace_id:
+                proposed = (action.get("proposedTreatment") or "").strip()
+                if proposed:
+                    return proposed
 
-    def process_trace(self, member_id: str) -> dict:
-        """Phase 3, step 2: process the member's pending prior-auth trace.
-
-        Deterministically computes the decision from the member's CURRENT record,
-        the guideline, and comparable precedent, then applies bounded authority.
-        Records the memory-typed `steps[]`, `contextSnapshot`, `outcome`, and
-        `review`, and recomputes the member summary. Raises ValueError if there is
-        no pending trace.
-        """
-        trace = self.repository.find_pending_by_member(member_id)
-        if not trace:
-            raise ValueError(f"No pending authorization for member {member_id}")
-        member = self.member_repo.get_by_key(member_id)
-        if not member:
-            raise ValueError(f"Member {member_id} not found")
-
-        # --- Assemble the facts (from the current record) --------------------
-        requested_service = trace["requested_service"]
-        therapy = (
-            member.get("current_care_plan", {}).get("considering_therapy")
-            or requested_service.replace("biologic therapy - ", "")
-        )
-        diagnoses = member.get("clinical_history", {}).get("diagnoses", [])
-        diagnosis_code = diagnoses[0]["code"] if diagnoses else None
-        guideline = self.guideline_repo.latest_for_condition(diagnosis_code) or {}
-
-        eligible = member.get("eligibility", {}).get("status") == "active"
-        therapy_tier = guideline.get("classification", {}).get(therapy, {}).get("tier")
-        tier_covered, matched_treatment = self._coverage(
-            member, therapy, diagnosis_code, therapy_tier
-        )
-        step_met, step_note, best_months, min_months, step_drug = self._step_therapy_met(
-            member, guideline
-        )
-        comparable = self.claim_service.find_comparable_cases(
-            requested_service, diagnosis_code, member_id=member_id
-        )
-        gaps = self.claim_service.detect_refill_gaps(member_id)["gaps"]
-        unresolved_gap = bool(gaps) and not self._has_gap_review(member)
-        threshold = guideline.get("confidence_threshold", 0.90)
-
-        # --- Decide (transparent, computed) ----------------------------------
-        status, routed_to_human, confidence, reasoning = self._decide(
-            eligible, therapy_tier, tier_covered, step_met,
-            len(comparable), unresolved_gap, threshold,
-        )
-        decision = "approved" if status == "approved" else (
-            "denied" if status == "denied" else "pending"
-        )
-
-        now = _now()
-        trace["status"] = status
-        trace["contextSnapshot"] = {
-            "guidelineRef": guideline.get("_id", "unknown"),
-            "inputFacts": self._input_facts(
-                eligible, therapy_tier, tier_covered, member.get("policyId"),
-                step_note, comparable, gaps, unresolved_gap, matched_treatment,
-            ),
-        }
-        trace["steps"] = self._build_steps(
-            therapy, diagnosis_code, therapy_tier, tier_covered,
-            step_drug, best_months, min_months, step_met, comparable,
-        )
-        trace["outcome"] = {
-            "decision": decision,
-            "rationale": reasoning,
-            "confidence": confidence,
-            "overrideFlag": False,
-        }
-        trace["review"] = {
-            "routedToHuman": routed_to_human,
-            "finalDecisionMaker": "medical_director" if routed_to_human else "agent",
-            "closedBy": None if routed_to_human else "pathway_agent",
-            "closedAt": None if routed_to_human else now,
-        }
-        meta = trace.setdefault("audit", {})
-        meta["reviewRequired"] = routed_to_human
-        if routed_to_human:
-            meta["reviewRequiredReason"] = (
-                "clinical_denial_requires_physician_closure" if status == "denied"
-                else "confidence_below_threshold"
-            )
-        trace["updatedAt"] = now
-        self.repository.upsert(trace)
-
-        if status == "approved" and not routed_to_human:
-            self._mark_approved_therapy(member, therapy)
-        self._recompute_summary(member)  # 2a
-        return trace
-
-    # --- decision helpers ----------------------------------------------------
-
-    def _resolve_plan(self, member: dict) -> dict:
-        """member -> policy -> plan."""
-        policy = self.policy_repo.get_by_key(member.get("policyId")) or {}
-        return self.plan_repo.get_by_key(policy.get("planId")) or {}
-
-    def _coverage(self, member: dict, therapy: str, diagnosis_code: str,
-                  therapy_tier: str) -> tuple:
-        """Does the member's plan cover the requested therapy? Returns
-        (covered, matched_treatment_or_None).
-
-        Treatment-level lookup first, delegated to `PlanService.find_treatment` so
-        this shares one matcher with the Insurance Agent's coverage endpoint — two
-        implementations would eventually disagree about whether a plan covers
-        something, and the clinical path would decide on different facts than the
-        administrative gate. The matched entry's `covered` flag is authoritative: a
-        plan can cover the specialty tier generally yet exclude a specific biologic.
-
-        Falls back to tier-level coverage when the therapy has no treatment entry.
-
-        Note that `therapy` is a drug name, never a code — this path resolves it
-        through `treatmentName`, since the final data model has no `drug` field.
-        The previous implementation matched on that removed field, so it never
-        matched anything and every treatment-level exclusion was silently missed.
-        """
-        plan = self._resolve_plan(member)
-        entry, _matched_on = PlanService.find_treatment(
-            plan, condition=diagnosis_code, drug=therapy
-        )
-        if entry:
-            return bool(entry.get("covered")), entry
-
-        # No treatment-level entry — fall back to the tier flag.
-        if not therapy_tier:
-            return True, None
-        tiers = plan.get("coverage", {}).get("tiers", {})
-        return bool(tiers.get(therapy_tier, {}).get("covered")), None
-
-    def _step_therapy_met(self, member: dict, guideline: dict) -> tuple:
-        """Step therapy met if the LONGEST documented trial of the required drug
-        meets the minimum. Returns (met, note, best_months, min_months, drug)."""
-        st = guideline.get("criteria", {}).get("step_therapy", {})
-        if not st:
-            return True, "no step therapy requirement", 0, 0, None
-        drug = st.get("drug")
-        min_months = st.get("min_months", 6)
-        durations = [
-            r.get("duration_months", 0)
-            for r in member.get("clinical_history", {}).get("treatment_responses", [])
-            if r.get("drug") == drug
-        ]
-        best = max(durations) if durations else 0
-        met = best >= min_months
-        return met, (
-            f"step therapy: {drug} {best} months documented vs {min_months} required — "
-            f"{'satisfied' if met else 'NOT satisfied'}"
-        ), best, min_months, drug
-
-    def _has_gap_review(self, member: dict) -> bool:
-        return any(
-            r.get("outcome") == "gap_reviewed"
-            for r in member.get("clinical_history", {}).get("treatment_responses", [])
-        )
-
-    def _decide(self, eligible, therapy_tier, tier_covered, step_met,
-                comparable_count, unresolved_gap, threshold) -> tuple:
-        """Return (status, routed_to_human, confidence, reasoning). Unchanged
-        bounded-authority logic ported from the former authorization service."""
-        if not eligible:
-            return ("denied", False, 0.99,
-                    "Member not eligible (coverage termed). Administrative "
-                    "determination — no clinical review required.")
-        if therapy_tier and not tier_covered:
-            return ("denied", False, 0.99,
-                    f"Plan does not cover the {therapy_tier} tier this therapy "
-                    "requires. Benefit exclusion — administrative determination.")
-
-        confidence = 0.0
-        if step_met:
-            confidence += 0.60
-        if tier_covered:
-            confidence += 0.15
-        confidence += min(comparable_count, 2) * 0.10
-        if unresolved_gap:
-            confidence -= 0.15
-        confidence = round(min(max(confidence, 0.0), 0.99), 2)
-
-        if not step_met:
-            return ("denied", True, confidence,
-                    "Step therapy not satisfied. Denial recommended — a medical "
-                    "director must make the final call. Agents never deny alone.")
-        if confidence >= threshold:
-            return ("approved", False, confidence,
-                    f"All criteria satisfied; confidence {confidence} >= threshold "
-                    f"{threshold}. Auto-approved.")
-        return ("pending_review", True, confidence,
-                f"Criteria met but confidence {confidence} < threshold {threshold} "
-                "(e.g. no comparable precedent, or unresolved anomaly). Routed to a "
-                "medical director.")
-
-    def _build_steps(self, therapy, diagnosis_code, therapy_tier, tier_covered,
-                     step_drug, best_months, min_months, step_met, comparable) -> list:
-        """The memory-typed reasoning trail — the demo's core claim as data.
-
-        Every step carries a structured `input`/`output` alongside the prose
-        `detail`, so the evidence a step consumed and the conclusion it produced
-        are machine-readable (datamodel §5) rather than only narratable. Both are
-        derived from the computed facts passed in — nothing is condition- or
-        drug-specific, so this holds for any persona, including the cases with no
-        step-therapy requirement and no comparable precedent.
-        """
-        comparable_ids = [c["claimId"] for c in comparable]
-        steps = [
-            {
-                "stepId": "STP-001",
-                "memoryType": "semantic",
-                "name": "match therapy to condition",
-                "input": {
-                    "requested_therapy": therapy,
-                    "diagnosis_code": diagnosis_code,
-                },
-                "output": {
-                    "matched": bool(therapy and diagnosis_code),
-                },
-                "detail": f"Matched requested therapy {therapy} to condition {diagnosis_code}.",
-                "confidence": 0.98,
-            },
-            {
-                "stepId": "STP-002",
-                "memoryType": "taxonomic",
-                "name": "classify therapy",
-                "input": {
-                    "therapy": therapy,
-                    "classified_tier": therapy_tier,
-                },
-                "output": {
-                    "tier": therapy_tier,
-                    "tier_covered": tier_covered,
-                },
-                "detail": (
-                    f"Classified {therapy} as {therapy_tier or 'n/a'} tier; "
-                    f"plan coverage of that tier: {'yes' if tier_covered else 'no'}."
-                ),
-                "confidence": 0.97,
-            },
-            {
-                "stepId": "STP-003",
-                "memoryType": "episodic",
-                "name": "member trial + comparable cases",
-                "input": {
-                    "trial_drug": step_drug,
-                    "documented_months": best_months,
-                    "diagnosis_code": diagnosis_code,
-                },
-                "output": {
-                    "comparable_case_ids": comparable_ids,
-                    "comparable_count": len(comparable_ids),
-                    "precedent_found": bool(comparable_ids),
-                },
-                "detail": (
-                    f"Member trial: {step_drug} {best_months} months documented. "
-                    + (
-                        "Comparable approved cases: "
-                        + ", ".join(c["claimId"] for c in comparable)
-                        if comparable else "No comparable approved precedent found."
-                    )
-                ),
-                "confidence": 0.95,
-            },
-            {
-                "stepId": "STP-004",
-                "memoryType": "procedural",
-                "name": "apply step-therapy gate",
-                "input": {
-                    "required_drug": step_drug,
-                    "required_months": min_months,
-                    "documented_months": best_months,
-                },
-                "output": {
-                    "step_therapy_satisfied": step_met,
-                },
-                "detail": (
-                    f"Step therapy requires {min_months} months; {best_months} documented — "
-                    f"{'satisfied' if step_met else 'not satisfied'}."
-                ),
-                "confidence": 0.90,
-            },
-        ]
-        return steps
-
-    def _input_facts(self, eligible, therapy_tier, tier_covered, policy_id,
-                     step_note, comparable, gaps, unresolved_gap,
-                     matched_treatment=None) -> list:
-        facts = [
-            f"eligibility: coverage {'active' if eligible else 'TERMED'}",
-            f"benefit: {therapy_tier or 'n/a'} tier "
-            f"{'covered' if tier_covered else 'NOT covered'} under policy {policy_id}",
-            step_note,
-        ]
-        if matched_treatment is not None:
-            facts.append(
-                f"plan treatment {matched_treatment.get('treatmentCode', '')} "
-                f"({matched_treatment.get('drug')}): "
-                f"{'COVERED' if matched_treatment.get('covered') else 'NOT covered'} "
-                f"per plan formulary"
-            )
-        if comparable:
-            facts.append(
-                "comparable cases: "
-                + ", ".join(c["claimId"] for c in comparable)
-                + " (approved, similar presentation)"
-            )
-        else:
-            facts.append("comparable cases: none found")
-        if gaps:
-            facts.append(
-                f"refill gap: {len(gaps)} detected — "
-                f"{'UNRESOLVED' if unresolved_gap else 'resolved'}"
-            )
-        return facts
+        return ((member.get("current_care_plan") or {}).get("considering_therapy") or "").strip()
 
     def _mark_approved_therapy(self, member: dict, therapy: str) -> None:
         cp = member.setdefault("current_care_plan", {})
@@ -515,8 +189,8 @@ class AuditService:
         """Generate an unused `traceId` shaped like the existing data.
 
         `TRC-{YEAR}-PA-{5 digits}` — e.g. `TRC-2026-PA-44109` — matching the seeded
-        traces rather than the `TRC-{uuid}` form `file_trace` uses, so the collection
-        does not end up with two visibly different id styles.
+        traces, so the collection does not end up with two visibly different id
+        styles.
 
         Randomly drawn, for the same reason as `claimId`: a max-scan-and-increment
         is racy between concurrent creates. Uniqueness rests on the unique index on
@@ -550,15 +224,13 @@ class AuditService:
         closure are all filled in later, by this agent for the administrative gates
         and by the care-coordination agent for the clinical ones.
 
-        Distinct from `file_trace`, which is the EHR/provider filing a request. This
-        is the insurance side opening the case shell.
+        This is the only way a case is opened: the insurance agent creates the
+        shell here at step 0 and attaches the `traceId` to the member's pending
+        action, and the care-coordination agent picks it up from there.
 
         Also writes the two workflow fields `status` and `requested_service`, which
-        the final data model does not define but this backend already produces on
-        every trace `file_trace` creates. They are what `find_pending_by_member`
-        queries, so without them the care-coordination agent could not find the
-        trace this opens and would file a second one for the same case — two traces
-        per authorization, and step 8 routing whichever it happened to read.
+        the final data model does not define but this backend produces on every
+        trace, so a case in flight can be told from a closed one.
 
         `input_facts` is a ";"-delimited string; empty parts are dropped.
         """
@@ -951,6 +623,16 @@ class AuditService:
         trace = self.repository.get_by_key(trace_id)
         member = self.member_repo.get_by_key(trace.get("subjectRef"))
         if member:
+            # An agent-closed approval has to move the care plan on, exactly as a
+            # physician closure does: the member record is what the next request
+            # reads, and leaving `approved_therapy` null after an approval makes the
+            # record disagree with its own trace. `approved_restricted` counts — the
+            # therapy was approved, only its stages are limited.
+            if decision in APPROVAL_DECISIONS:
+                therapy = self._resolve_therapy(trace, member)
+                if therapy:
+                    self._mark_approved_therapy(member, therapy)
+            # Persists the care-plan edit above too; see `_recompute_summary`.
             self._recompute_summary(member)
         return trace
 
@@ -1188,9 +870,10 @@ class AuditService:
 
         member = self.member_repo.get_by_key(trace["subjectRef"])
         if member:
-            if decision == "approved":
-                therapy = trace.get("requested_service", "").replace("biologic therapy - ", "")
-                self._mark_approved_therapy(member, therapy)
+            if decision in APPROVAL_DECISIONS:
+                therapy = self._resolve_therapy(trace, member)
+                if therapy:
+                    self._mark_approved_therapy(member, therapy)
             self._recompute_summary(member)
 
         # Notify the member of the final human decision (parity with the happy

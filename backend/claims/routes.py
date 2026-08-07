@@ -60,8 +60,8 @@ async def detect_refill_gaps(
     drug: str = None,
     service: ClaimService = Depends(get_claim_service),
 ):
-    """Phase 2, step 1: detect breaks in medication refill cadence from the
-    pharmacy claims."""
+    """Step 5b: detect breaks in medication refill cadence from the pharmacy
+    claims."""
     return service.detect_refill_gaps(member_id, drug=drug)
 
 

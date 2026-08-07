@@ -542,10 +542,9 @@ class MemberService:
 
         Derived, not incremented. The tool catalog frames this as applying an
         `open_authorization_delta`, but a delta assumes exactly one writer and this
-        field has two — this endpoint and the care-coordination path's
-        `process_trace`. Counting the traces instead means the two can run in any
-        order, or twice, and still agree. `shared.summary` holds the derivation both
-        use.
+        field has two — this endpoint and the closure paths in `AuditService`.
+        Counting the traces instead means the two can run in any order, or twice,
+        and still agree. `shared.summary` holds the derivation both use.
 
         `last_authorization_status` is accepted as an override for the rare case
         where a caller knows the outcome before it has landed on a trace; when
@@ -629,15 +628,17 @@ class MemberService:
         self,
         member_id: str,
         drug: str,
-        effective_trial_months: int,
+        effective_trial_months: float,
         conclusion: str,
         related_note: str = None,
     ) -> dict:
-        """Phase 2, step 2: the verification agent attaches its gap conclusion.
+        """Step 5b: the care-coordination agent attaches its gap conclusion.
 
-        Records the agent-authored `conclusion` as a treatment_response so the
-        effective trial stands and the case proceeds. Generic — no condition/drug
-        is hardcoded. Returns the updated member, or None if it does not exist.
+        Records the agent-authored `conclusion` as a treatment_response so an explained
+        gap stays explained — `review_trial_history` reads a `gap_reviewed` entry back
+        as documentation on a later run. Generic: no condition or drug is hardcoded.
+
+        Returns the updated member, or None if it does not exist.
         """
         member = self.repository.get_by_key(member_id)
         if not member:
@@ -650,7 +651,7 @@ class MemberService:
             "duration_months": effective_trial_months,
             "outcome": "gap_reviewed",
             "notes": conclusion,
-            "documented_by": "verification_agent",
+            "documented_by": "care_coordination_agent",
             "documented_on": now.strftime("%Y-%m-%d"),
         }
         # Provenance: cite the clinical note that explained the gap so the

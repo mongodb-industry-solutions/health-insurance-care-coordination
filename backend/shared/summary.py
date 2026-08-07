@@ -52,8 +52,8 @@ def status_of(trace: dict) -> str:
     the wrong thing.
 
     Reads `outcome.decision` and `review.*`, with a fallback to the legacy
-    top-level `status` that `AuditService.process_trace` still writes and that the
-    final data model does not define.
+    top-level `status` that seeded traces still carry and that the final data
+    model does not define.
     """
     review = trace.get("review") or {}
     outcome = trace.get("outcome") or {}
