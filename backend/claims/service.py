@@ -11,12 +11,16 @@ from shared.collections import Collections
 from members.repository import MemberRepository
 from .repository import ClaimRepository
 
-# Statuses that assert the insurer is paying. None may be set while the linked
-# decision trace says otherwise — see `update_claim_status`.
+# Statuses that assert the insurer is paying.
 _PAYING_STATUSES = ("approved", "approved_restricted", "paid")
 
-# Trace outcomes that contradict a paying claim status.
-_NON_PAYING_DECISIONS = ("denied", "pending", None, "")
+# Trace decisions that support a paying claim status.
+_APPROVAL_DECISIONS = ("approved", "approved_restricted")
+
+# The only claim status permitted while the linked trace has reached no decision.
+# A case in flight, or escalated and awaiting a medical director, is legitimately
+# pending — anything else would assert an outcome nothing has determined.
+_UNDECIDED_STATUS = "pending"
 
 VALID_CLAIM_STATUSES = (
     "pending",
@@ -175,11 +179,21 @@ class ClaimService:
     ) -> dict:
         """Insurance Agent, step 9: apply a reached decision to its claim.
 
-        Enforces the consistency guardrail from the data model: a claim may not
-        assert that the insurer is paying while its linked decision trace records a
-        denial or is still undecided. The claim and the trace are two views of one
-        determination, and a demo that lets them disagree has no audit trail worth
-        inspecting.
+        Enforces the consistency guardrail from the data model: **a claim's status
+        must agree with its linked decision trace, in both directions.** The claim
+        and the trace are two views of one determination, and a demo that lets them
+        disagree has no audit trail worth inspecting.
+
+        The check used to apply only to paying statuses, on the reasoning that an
+        administrative denial legitimately has no *clinical* trace. That was wrong:
+        "no clinical reasoning" is not the same as "no decision", and it allowed a
+        real case to be recorded as denied — with the member owed the full billed
+        amount — against a trace holding no decision and no closure at all. A denial
+        asserted with nothing recording it is precisely what an audit trail exists to
+        prevent.
+
+        `pending` is always permitted: a case in flight, or escalated and awaiting a
+        medical director, is legitimately undecided.
 
         Raises LookupError for a missing claim (-> HTTP 404) and ValueError for an
         invalid status or a guardrail violation (-> HTTP 400).
@@ -195,11 +209,11 @@ class ClaimService:
             raise LookupError(f"Claim {claim_id} not found")
 
         trace_id = linked_audit_trace_id or claim.get("linkedAuditTraceId")
-        if status in _PAYING_STATUSES:
+        if status != _UNDECIDED_STATUS:
             if not trace_id:
                 raise ValueError(
                     f"Cannot set claim {claim_id} to {status!r} with no linked decision "
-                    "trace: there is nothing recording that the payment was authorized."
+                    "trace: there is nothing recording how the case was decided."
                 )
             trace = self._connector.get_collection(Collections.AUDIT_LOG).find_one(
                 {"traceId": trace_id}
@@ -209,12 +223,23 @@ class ClaimService:
                     f"Cannot set claim {claim_id} to {status!r}: linked trace "
                     f"{trace_id} does not exist, so the decision cannot be verified."
                 )
-            decision = (trace.get("outcome") or {}).get("decision")
-            if decision in _NON_PAYING_DECISIONS:
+            decision = ((trace.get("outcome") or {}).get("decision") or "").strip().lower()
+            if not decision:
+                raise ValueError(
+                    f"Cannot set claim {claim_id} to {status!r}: trace {trace_id} records "
+                    "no decision, so there is nothing to apply. Close or escalate the "
+                    f"trace first, or set the claim to {_UNDECIDED_STATUS!r}."
+                )
+            if status in _PAYING_STATUSES and decision not in _APPROVAL_DECISIONS:
                 raise ValueError(
                     f"Cannot set claim {claim_id} to {status!r} while trace {trace_id} "
                     f"records decision {decision!r}. Resolve the trace first — the claim "
                     "and its trace must tell the same story."
+                )
+            if status == "denied" and decision != "denied":
+                raise ValueError(
+                    f"Cannot deny claim {claim_id} while trace {trace_id} records decision "
+                    f"{decision!r}. A denial must be backed by a recorded determination."
                 )
 
         now = _now()

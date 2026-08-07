@@ -47,6 +47,29 @@ CLINICAL_MEMORY_TYPES = ("episodic", "procedural")
 # are factual gates that fire before clinical reasoning runs.
 ADMIN_CLOSABLE_REASONS = ("eligibility_lapsed", "benefit_exclusion")
 
+# The determination each administrative ground represents. An administrative
+# closure records its own outcome from this map rather than requiring one to be on
+# the trace already: for a factual gate the reason IS the decision, and nothing in
+# the Insurance Agent's toolset writes `outcome` — that is step 7, which belongs to
+# the clinical agent and never runs when the process short-circuits at step 1 or 2.
+# Without this, every administrative denial was unclosable.
+ADMIN_RATIONALES = {
+    "eligibility_lapsed": (
+        "Coverage was not active on the date of service. Administrative eligibility "
+        "denial — the policy term decided the case, so no clinical review was required."
+    ),
+    "benefit_exclusion": (
+        "The plan does not cover the requested treatment. Administrative "
+        "benefit-exclusion denial — the benefit design decided the case, so no "
+        "clinical review was required."
+    ),
+}
+
+# An administrative determination is a factual comparison against records already
+# on file, not a judgement. 1.0 is reserved for nothing, since the record itself
+# could be wrong.
+ADMIN_CONFIDENCE = 0.99
+
 # Used when no guideline can be resolved. Deliberately strict: defaulting low
 # would let a low-confidence approval close itself on missing reference data.
 DEFAULT_CONFIDENCE_THRESHOLD = 0.90
@@ -796,15 +819,21 @@ class AuditService:
             "detail": detail,
         }
 
-    def _assert_closable(self, trace: dict, closed_by: str) -> dict:
+    def _assert_closable(
+        self, trace: dict, closed_by: str, require_outcome: bool = True
+    ) -> dict:
         """Shared preconditions for both agent-closure paths.
 
         Each closure endpoint re-checks its own conditions rather than trusting
         `route_decision`'s verdict: a guardrail that can be bypassed by simply not
         calling the checkpoint first is not a guardrail.
+
+        `require_outcome=False` is used by the administrative path, which records
+        its own determination from the closure reason. An approval must always have
+        been recommended by clinical review first, so that path keeps the check.
         """
         outcome = trace.get("outcome") or {}
-        if not outcome.get("decision"):
+        if require_outcome and not outcome.get("decision"):
             raise ValueError(
                 f"Trace {trace['traceId']} has no recommendation on it yet. A case "
                 "cannot be closed before it has been decided."
@@ -861,10 +890,21 @@ class AuditService:
         Permitted for exactly two grounds, both factual gates that fire before
         clinical review: `eligibility_lapsed` and `benefit_exclusion`.
 
-        **This refusal is the literal implementation of bounded authority.** The
-        method rejects a denial that was reached through clinical reasoning, and a
-        400 here is the correct answer rather than an obstacle — the case belongs to
-        a medical director.
+        **Records the determination as part of closing it.** Nothing in the Insurance
+        Agent's toolset writes `outcome` — that is step 7, which belongs to the
+        clinical agent and never runs when the process short-circuits at step 1 or 2 —
+        so requiring a pre-existing recommendation made every administrative denial
+        unclosable. For a factual gate the reason IS the decision, and its rationale
+        comes from `ADMIN_RATIONALES` rather than from the agent's prose, so the same
+        gate is always described the same way.
+
+        An outcome already on the trace is respected, not overwritten: if it says
+        anything other than `denied`, this path refuses.
+
+        **The clinical refusal is the literal implementation of bounded authority**,
+        and it is checked BEFORE any outcome is written, so a refused closure leaves
+        the trace exactly as it was. A 400 here is the correct answer rather than an
+        obstacle — the case belongs to a medical director.
 
         Raises LookupError (-> 404) and ValueError (-> 400).
         """
@@ -878,19 +918,36 @@ class AuditService:
         if not trace:
             raise LookupError(f"Trace {trace_id} not found")
 
-        outcome = self._assert_closable(trace, closed_by)
+        outcome = self._assert_closable(trace, closed_by, require_outcome=False)
         decision = (outcome.get("decision") or "").strip().lower()
-        if decision != "denied":
+        if decision and decision != "denied":
             raise ValueError(
-                f"Trace {trace_id} records decision {decision!r}. An administrative "
-                "determination on these grounds is a denial; use "
+                f"Trace {trace_id} already records decision {decision!r}. An "
+                "administrative determination on these grounds is a denial; use "
                 "/close-authorization for an approval."
             )
+        # Checked before writing anything: a refusal must leave the trace untouched.
         if self._has_clinical_reasoning(trace):
             raise ValueError(
                 f"Trace {trace_id} carries clinical reasoning (episodic/procedural "
                 "steps), so this denial is not an administrative determination. Only a "
                 "medical director may close a clinical denial — escalate it instead."
+            )
+
+        if not decision:
+            decision = "denied"
+            self.repository.update_fields(
+                trace_id,
+                {
+                    "outcome": {
+                        "decision": decision,
+                        "rationale": ADMIN_RATIONALES[reason],
+                        "confidence": ADMIN_CONFIDENCE,
+                        "overrideFlag": False,
+                        "overrideBy": None,
+                        "overrideReason": None,
+                    }
+                },
             )
         return self._close(trace_id, decision, closed_by, flag=reason)
 
