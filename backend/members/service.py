@@ -224,9 +224,18 @@ class MemberService:
             for r in history.get("treatment_responses") or []
             if (r.get("drug") or "").strip().lower() == wanted
         ]
+        # `documented_months` is what a CLINICIAN wrote down, so a gap_reviewed entry
+        # is excluded: that one holds `effective_trial_months`, which this method
+        # derived itself. Counting it would let a resolved gap raise the documented
+        # figure on the next read — the agent's own output feeding back in as though
+        # it were documentation, and the stale interim record (Maria: 3 months against
+        # 7 months of fills) quietly disappearing after the first run.
+        clinician_documented = [
+            r for r in responses if (r.get("outcome") or "") != "gap_reviewed"
+        ]
         # Later entries supersede earlier interim ones rather than adding to them.
         documented_months = max(
-            [float(r.get("duration_months") or 0) for r in responses] or [0.0]
+            [float(r.get("duration_months") or 0) for r in clinician_documented] or [0.0]
         )
 
         fills = self._fill_dates(member_id, drug)
@@ -638,6 +647,11 @@ class MemberService:
         gap stays explained — `review_trial_history` reads a `gap_reviewed` entry back
         as documentation on a later run. Generic: no condition or drug is hardcoded.
 
+        **Idempotent per drug.** A re-run replaces this drug's existing `gap_reviewed`
+        entry rather than appending a second one. The same gap reviewed twice is one
+        conclusion re-stated, not two findings, and an appending write would grow the
+        record without bound across replays of the same case.
+
         Returns the updated member, or None if it does not exist.
         """
         member = self.repository.get_by_key(member_id)
@@ -659,7 +673,18 @@ class MemberService:
         # trail no longer carries this — it lives on the record).
         if related_note:
             entry["related_note"] = related_note
-        clinical.setdefault("treatment_responses", []).append(entry)
+
+        responses = clinical.setdefault("treatment_responses", [])
+        wanted = (drug or "").strip().lower()
+        for index, existing in enumerate(responses):
+            if (existing.get("outcome") or "") == "gap_reviewed" and (
+                existing.get("drug") or ""
+            ).strip().lower() == wanted:
+                responses[index] = entry
+                break
+        else:
+            responses.append(entry)
+
         member["updatedAt"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         self.repository.upsert(member)
         return member
