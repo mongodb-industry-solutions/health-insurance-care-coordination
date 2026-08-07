@@ -651,11 +651,15 @@ class MemberService:
         the drug, as the newest one. The same gap reviewed twice is one conclusion
         re-stated, not two findings.
 
-        Every prior entry for the drug is dropped, not just the one being superseded,
-        so a record carrying duplicates from before this was idempotent is repaired on
-        the next write. That matters because `review_trial_history` reads
-        `prior_reviews[-1]`: leaving an older duplicate in place after it would keep
-        serving a stale conclusion no re-run could displace.
+        Only `gap_reviewed` entries for this drug are dropped — every one of them, not
+        just the entry being superseded — so a record carrying duplicates from before
+        this was idempotent is repaired on the next write. That matters because
+        `review_trial_history` reads `prior_reviews[-1]`: leaving an older duplicate
+        in place after the new entry would keep serving a stale conclusion no re-run
+        could displace.
+
+        Clinician-written responses for this drug are untouched, as are all entries
+        for other drugs. This method only ever supersedes its own output.
 
         Returns the updated member, or None if it does not exist.
         """
