@@ -11,6 +11,7 @@
 
   /* Brand + neutrals */
   --color-green: #00684a;
+  --color-green-dark: #00453a;
   --color-green-soft: #1a7a5e;
   --color-charcoal: #1a1a1a;
   --color-muted: #666666;
@@ -21,6 +22,7 @@
   /* Layout */
   --page-max-width: 1280px;
   --page-padding-x: 64px;
+  --app-padding-x: 44px; /* main dashboard shell */
 }
 
 html,
@@ -36,5 +38,6 @@ body {
 @media (max-width: 640px) {
   :root {
     --page-padding-x: 24px;
+    --app-padding-x: 20px;
   }
 }

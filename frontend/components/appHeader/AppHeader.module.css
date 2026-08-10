@@ -1,0 +1,93 @@
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px var(--app-padding-x);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.leaf {
+  width: auto;
+  height: 30px;
+}
+
+.wordmark {
+  font-family: var(--font-serif);
+  font-size: 21px;
+  font-weight: 700;
+  color: var(--color-green);
+}
+
+.actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 26px;
+}
+
+/* Icon above, label below. */
+.action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.actionIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  color: var(--color-green);
+  transition: background-color 150ms ease;
+}
+
+.actionIconFilled {
+  background-color: var(--color-green);
+  color: #ffffff;
+}
+
+.action:hover .actionIcon {
+  background-color: var(--color-green-tint);
+  color: var(--color-green);
+}
+
+.action:hover .actionIconFilled {
+  background-color: var(--color-green-dark);
+  color: #ffffff;
+}
+
+.actionLabel {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-charcoal);
+}
+
+.action:focus-visible {
+  outline: 2px solid var(--color-green);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+
+@media (max-width: 720px) {
+  .wordmark {
+    font-size: 16px;
+  }
+
+  .actions {
+    gap: 14px;
+  }
+}
