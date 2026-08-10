@@ -29,7 +29,30 @@ export function startPendingAction(memberId, actionId) {
   });
 }
 
-/** GET /api/plans/{planId}/coverage — used by the Insurance Information tab. */
-export function fetchPlanCoverage(planId) {
-  return apiFetch(`/api/plans/${planId}/coverage`);
+/** GET /api/policies/{policyId} — effective period, premium, plan id. */
+export function fetchPolicy(policyId) {
+  return apiFetch(`/api/policies/${policyId}`);
+}
+
+/**
+ * GET /api/claims/member/{memberId} — the member's claims.
+ *
+ * #PLACEHOLDER ENDPOINT - Please update once backend has this endpoint implemented
+ * There is no out-of-pocket accumulator field anywhere in the backend (searched
+ * for amountMet/accumulator/out_of_pocket across `backend/`), so the amount met
+ * is derived by summing `memberOwed` on this year's claims. Replace with a real
+ * `outOfPocket` field on the policy/plan response if one is added.
+ */
+export function fetchMemberClaims(memberId) {
+  return apiFetch(`/api/claims/member/${memberId}`);
+}
+
+/** GET /api/audit/member/{memberId}/traces — prior-authorization decisions. */
+export function fetchMemberTraces(memberId) {
+  return apiFetch(`/api/audit/member/${memberId}/traces`);
+}
+
+/** GET /api/plans/{planId} — carries `coverage.tiers` for the tier cards. */
+export function fetchPlan(planId) {
+  return apiFetch(`/api/plans/${planId}`);
 }

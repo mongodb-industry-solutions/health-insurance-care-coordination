@@ -1,0 +1,60 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.service {
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  color: var(--color-charcoal);
+}
+
+.date {
+  display: block;
+  font-family: var(--font-serif);
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.decision {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.approved {
+  background-color: #c0fae6;
+  color: #00593f;
+}
+
+.denied {
+  background-color: #ffcdc7;
+  color: #970606;
+}
+
+.pending {
+  background-color: #ffec9e;
+  color: #944f01;
+}
+
+.empty {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 14px;
+  color: var(--color-muted);
+}
