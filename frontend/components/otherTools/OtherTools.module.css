@@ -3,7 +3,7 @@
 }
 
 .title {
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   font-family: var(--font-serif);
   font-size: 22px;
   font-weight: 700;
@@ -13,40 +13,48 @@
 .divider {
   height: 1px;
   border: none;
-  margin: 0 0 22px;
+  margin: 0 0 12px;
   background-color: var(--color-border);
 }
 
 .group + .group {
-  margin-top: 24px;
+  margin-top: 14px;
 }
 
 .groupLabel {
-  margin: 0 0 12px;
+  margin: 0 0 9px;
   font-family: var(--font-serif);
   font-size: 15px;
   font-weight: 700;
   color: var(--color-green);
 }
 
+/* Two-column grid of compact tiles, roughly half the height of the old
+   full-width pill rows. */
 .list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
 }
 
 .row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  padding: 15px 20px;
+  min-height: 42px;
+  padding: 10px 14px;
   border: none;
-  border-radius: 14px;
+  border-radius: 12px;
   cursor: pointer;
   text-align: left;
-  transition: filter 150ms ease;
+  transition: filter 150ms ease, transform 150ms ease;
+}
+
+.row:hover {
+  transform: translateY(-2px);
+}
+
+.row:active {
+  transform: scale(0.98);
 }
 
 /* Tint is derived from the tool's category. */
@@ -69,12 +77,22 @@
 
 .rowLabel {
   font-family: var(--font-serif);
-  font-size: 15.5px;
+  font-size: 14px;
+  line-height: 1.25;
   color: var(--color-charcoal);
 }
 
-.tag {
-  font-family: var(--font-sans);
-  font-size: 12.5px;
-  color: #6b7f96;
+@media (prefers-reduced-motion: reduce) {
+  .row,
+  .row:hover,
+  .row:active {
+    transition: none;
+    transform: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .list {
+    grid-template-columns: 1fr;
+  }
 }

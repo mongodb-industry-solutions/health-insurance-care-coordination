@@ -142,14 +142,43 @@ export function toActiveTreatment(member) {
   };
 }
 
-/** Pending actions, with the raw type turned into readable copy. */
+/**
+ * Pending actions, with the raw type turned into readable copy.
+ *
+ * #PLACEHOLDER ENDPOINT - Please update once backend has this endpoint implemented
+ * `PendingAction` in `backend/members/models.py` has no `description`/`context`
+ * field and no `urgency` field — checked the schema before assuming. The context
+ * line below is composed from the fields that do exist (`proposedTreatment`,
+ * `raisedBy`), and urgency is inferred from status rather than read. Replace both
+ * with real fields if they are added.
+ */
 export function toPendingActions(member) {
   return (pick(member, "pending_actions", "pendingActions") ?? [])
     .filter((action) => action.status !== "resolved")
-    .map((action) => ({
-      id: pick(action, "action_id", "actionId"),
-      status: action.status,
-      label: titleCase(action.type),
-      proposedTreatment: pick(action, "proposed_treatment", "proposedTreatment"),
-    }));
+    .map((action) => {
+      const proposedTreatment = pick(
+        action,
+        "proposed_treatment",
+        "proposedTreatment"
+      );
+      const raisedBy = pick(action, "raised_by", "raisedBy");
+
+      const context = proposedTreatment
+        ? `${titleCase(proposedTreatment)} approval${
+            raisedBy ? ` requested by ${raisedBy}` : ""
+          } requires clinical review before proceeding.`
+        : "Requires clinical review before proceeding.";
+
+      return {
+        id: pick(action, "action_id", "actionId"),
+        status: action.status,
+        label: titleCase(action.type),
+        proposedTreatment,
+        raisedBy,
+        raisedAt: pick(action, "raised_at", "raisedAt"),
+        context,
+        // No urgency field exists; an untouched action is the one needing action.
+        urgency: action.status === "pending" ? "high" : "normal",
+      };
+    });
 }

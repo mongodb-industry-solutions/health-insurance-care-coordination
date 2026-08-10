@@ -4,7 +4,7 @@ import AppHeader from "@/components/appHeader/AppHeader";
 import DetailPanel from "@/components/detailPanel/DetailPanel";
 import OtherTools from "@/components/otherTools/OtherTools";
 import PatientIdentityCard from "@/components/patientIdentityCard/PatientIdentityCard";
-import PendingActions from "@/components/pendingActions/PendingActions";
+import PendingActionsZone from "@/components/pendingActionsZone/PendingActionsZone";
 import { toPendingActions } from "@/lib/memberPresenter";
 import { useMemberDashboard } from "./useMemberDashboard";
 import styles from "./MemberDashboard.module.css";
@@ -47,7 +47,7 @@ export default function MemberDashboard({ profile, onLogOut }) {
           </div>
 
           <div>
-            <PendingActions
+            <PendingActionsZone
               actions={toPendingActions(member)}
               startingActionId={startingActionId}
               onStartProcess={startProcess}

@@ -4,8 +4,10 @@ import { TOOL_CATEGORIES, getToolsByCategory } from "@/lib/const/tools";
 import styles from "./OtherTools.module.css";
 
 /**
- * Secondary tool launchers, grouped by category. Pill tint and tag text both
- * come from the tool's `category`, so adding a tool is a data-only change.
+ * Secondary tool launchers, grouped by category. Tile tint comes from the tool's
+ * `category`, so adding a tool is a data-only change. The category is carried by
+ * tint alone here — the inline tag text would truncate at tile width, and the
+ * group heading already names it.
  *
  * @param {(tool: object) => void} props.onOpenTool
  */
@@ -28,7 +30,6 @@ export default function OtherTools({ onOpenTool }) {
                 onClick={() => onOpenTool?.(tool)}
               >
                 <span className={styles.rowLabel}>{tool.label}</span>
-                <span className={styles.tag}>{category.tag}</span>
               </button>
             ))}
           </div>
