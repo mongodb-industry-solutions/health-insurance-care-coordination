@@ -1,14 +1,18 @@
 "use client";
 
-// import InfoWizard from "@/components/infoWizard/InfoWizard";
+import Header from "@/components/header/Header";
+import MemberSelection from "@/components/memberSelection/MemberSelection";
 
 export default function Home() {
+  // TODO: route into the member dashboard once that tab exists.
+  const handleStart = (member) => {
+    console.log("Starting demo as:", member.memberId);
+  };
+
   return (
-    <main className="flex flex-col min-h-screen items-center justify-center relative">
-      <div className="absolute top-8 left-1/2 -translate-x-1/2">
-        {/* <InfoWizard /> */}
-        <h1>Your components will go here</h1>
-      </div>
+    <main>
+      <Header />
+      <MemberSelection onStart={handleStart} />
     </main>
   );
 }
