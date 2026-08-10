@@ -4,7 +4,12 @@
   justify-content: space-between;
   gap: 24px;
   padding: 24px var(--app-padding-x);
-  border-bottom: 1px solid var(--color-border);
+  /* Brand artwork is dark green, so everything in here goes light. */
+  background-color: var(--color-green-dark);
+  background-image: url("/HeaderBG.png");
+  background-size: cover;
+  background-position: center right;
+  background-repeat: no-repeat;
 }
 
 .brand {
@@ -22,7 +27,7 @@
   font-family: var(--font-serif);
   font-size: 21px;
   font-weight: 700;
-  color: var(--color-green);
+  color: #ffffff;
 }
 
 .actions {
@@ -50,34 +55,35 @@
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  color: var(--color-green);
-  transition: background-color 150ms ease;
+  color: #ffffff;
+  transition: background-color 150ms ease, color 150ms ease;
 }
 
+/* Solid white against the dark artwork, so the primary action still pops. */
 .actionIconFilled {
-  background-color: var(--color-green);
-  color: #ffffff;
+  background-color: #ffffff;
+  color: var(--color-green-dark);
 }
 
 .action:hover .actionIcon {
-  background-color: var(--color-green-tint);
-  color: var(--color-green);
+  background-color: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
 }
 
 .action:hover .actionIconFilled {
-  background-color: var(--color-green-dark);
-  color: #ffffff;
+  background-color: var(--color-green-tint);
+  color: var(--color-green-dark);
 }
 
 .actionLabel {
   font-family: var(--font-sans);
   font-size: 12px;
   font-weight: 500;
-  color: var(--color-charcoal);
+  color: #ffffff;
 }
 
 .action:focus-visible {
-  outline: 2px solid var(--color-green);
+  outline: 2px solid #ffffff;
   outline-offset: 3px;
   border-radius: 8px;
 }
