@@ -47,6 +47,16 @@ export function fetchMemberClaims(memberId) {
   return apiFetch(`/api/claims/member/${memberId}`);
 }
 
+/** GET /api/claims/member/{memberId}/refill-gaps — breaks in refill cadence. */
+export function fetchRefillGaps(memberId) {
+  return apiFetch(`/api/claims/member/${memberId}/refill-gaps`);
+}
+
+/** GET /api/plans — every plan, for side-by-side comparison. */
+export function fetchPlans() {
+  return apiFetch("/api/plans");
+}
+
 /** GET /api/audit/member/{memberId}/traces — prior-authorization decisions. */
 export function fetchMemberTraces(memberId) {
   return apiFetch(`/api/audit/member/${memberId}/traces`);

@@ -1,10 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import AppHeader from "@/components/appHeader/AppHeader";
 import DetailPanel from "@/components/detailPanel/DetailPanel";
 import OtherTools from "@/components/otherTools/OtherTools";
 import PatientIdentityCard from "@/components/patientIdentityCard/PatientIdentityCard";
 import PendingActionsZone from "@/components/pendingActionsZone/PendingActionsZone";
+import ToolDrawer from "@/components/toolDrawer/ToolDrawer";
 import { toPendingActions } from "@/lib/memberPresenter";
 import { useMemberDashboard } from "./useMemberDashboard";
 import styles from "./MemberDashboard.module.css";
@@ -19,12 +21,10 @@ export default function MemberDashboard({ profile, onLogOut }) {
   const { member, loading, error, startingActionId, startProcess } =
     useMemberDashboard(profile.memberId);
 
+  const [openTool, setOpenTool] = useState(null);
+
   // TODO: point at the real settings route once it exists.
   const handleOpenSettings = () => console.log("Open settings");
-
-  // TODO: each tool needs its own view; logging the intent for now.
-  const handleOpenTool = (tool) =>
-    console.log("Open tool:", tool.id, tool.category);
 
   return (
     <>
@@ -52,10 +52,16 @@ export default function MemberDashboard({ profile, onLogOut }) {
               startingActionId={startingActionId}
               onStartProcess={startProcess}
             />
-            <OtherTools onOpenTool={handleOpenTool} />
+            <OtherTools onOpenTool={setOpenTool} />
           </div>
         </div>
       )}
+
+      <ToolDrawer
+        tool={openTool}
+        member={member}
+        onClose={() => setOpenTool(null)}
+      />
     </>
   );
 }

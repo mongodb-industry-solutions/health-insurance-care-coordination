@@ -21,13 +21,30 @@
   margin-top: 14px;
 }
 
+/* Remove the underline from the group label */
+
 .groupLabel {
+  position: relative;
+  display: inline-block;
   margin: 0 0 9px;
+  padding-bottom: 5px;
   font-family: var(--font-serif);
   font-size: 15px;
   font-weight: 700;
   color: var(--color-green);
 }
+
+/* .groupLabel::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 1.5px;
+  width: 100%;
+  background-color: var(--color-green);
+  transform-origin: left center;
+  animation: drawUnderline 400ms ease-out both;
+} */
 
 /* Two-column grid of compact tiles, roughly half the height of the old
    full-width pill rows. */
@@ -40,34 +57,73 @@
 .row {
   display: flex;
   align-items: center;
-  min-height: 42px;
-  padding: 10px 14px;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 12px;
   border: none;
   border-radius: 12px;
   cursor: pointer;
   text-align: left;
-  transition: filter 150ms ease, transform 150ms ease;
+  /* Staggered entrance; the per-tile delay is set inline. */
+  animation: riseIn 250ms ease-out both;
+  transition: background-color 150ms ease-out, transform 150ms ease-out,
+    box-shadow 150ms ease-out;
 }
 
 .row:hover {
   transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
 }
 
 .row:active {
   transform: scale(0.98);
+  transition-duration: 100ms;
 }
 
-/* Tint is derived from the tool's category. */
+/* Tint and icon accent are derived from the tool's category. */
 .insurance {
   background-color: #e9f7f5;
+  --tool-accent: #14837b;
+}
+
+.insurance:hover {
+  background-color: #dff2ef;
 }
 
 .health {
   background-color: #e4f5e9;
+  --tool-accent: #00684a;
 }
 
-.row:hover {
-  filter: brightness(0.97);
+.health:hover {
+  background-color: #d6efdd;
+}
+
+.icon {
+  flex: none;
+  display: flex;
+  color: var(--tool-accent);
+}
+
+.rowLabel {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.25;
+  color: var(--color-charcoal);
+}
+
+.chevron {
+  flex: none;
+  display: flex;
+  color: var(--color-muted);
+  opacity: 0.7;
+  transition: transform 150ms ease-out;
+}
+
+.row:hover .chevron {
+  transform: translateX(2px);
 }
 
 .row:focus-visible {
@@ -75,17 +131,33 @@
   outline-offset: 2px;
 }
 
-.rowLabel {
-  font-family: var(--font-serif);
-  font-size: 14px;
-  line-height: 1.25;
-  color: var(--color-charcoal);
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes drawUnderline {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .row,
   .row:hover,
-  .row:active {
+  .row:active,
+  .groupLabel::after,
+  .row:hover .chevron {
+    animation: none;
     transition: none;
     transform: none;
   }
