@@ -17,7 +17,7 @@ refill, etc.).
 
 from datetime import datetime, timedelta, timezone
 
-from .profiles import PROVIDERS, PatientProfile
+from .profiles import PROVIDERS, PatientProfile, seed_today
 from .plans import PLANS
 
 _PLANS_BY_ID = {plan["_id"]: plan for plan in PLANS}
@@ -83,10 +83,15 @@ def _provider(profile: PatientProfile) -> dict:
 
 
 def _trial_dates(profile: PatientProfile):
-    """Anchor dates shared by claims, notes and responses (keeps them aligned)."""
+    """Anchor dates shared by claims, notes and responses (keeps them aligned).
+
+    The offsets live on the profile because it derives `enrollment_date` by walking
+    this same trajectory backwards from today — if the two drifted apart, the trial
+    would no longer land where the profile placed it.
+    """
     start = _parse(profile.enrollment_date)
-    dx_date = start + timedelta(days=14)
-    trial_start = dx_date + timedelta(days=14)
+    dx_date = start + timedelta(days=profile.DX_OFFSET_DAYS)
+    trial_start = dx_date + timedelta(days=profile.TRIAL_START_OFFSET_DAYS)
     return start, dx_date, trial_start
 
 
@@ -124,28 +129,64 @@ def build_clinical_notes(profile: PatientProfile) -> list[dict]:
             "type": "medication_hold",
             "note": profile.trial_gap.clinical_reason,
         })
+    if profile.trial_outcome == "partial":
+        # The clinician's own account of the ambiguity. Typed `treatment_review`,
+        # deliberately NOT one of the gap-explanation types — this note explains how
+        # well the drug worked, not why a refill is missing, and must never be picked
+        # up as an explanation for an anomaly.
+        review_date = trial_start + timedelta(
+            days=profile.DAYS_PER_TRIAL_MONTH * profile.trial_months
+        )
+        notes.append({
+            "note_id": _note_id(profile, "partial"),
+            "date": _iso(review_date),
+            "author": profile.managing_provider,
+            "type": "treatment_review",
+            "note": (
+                f"Partial response to {profile.first_line_drug} after "
+                f"{profile.trial_months} months; considering escalation to "
+                f"{profile.considered_therapy}."
+            ),
+        })
     return notes
 
 
 def build_interim_response(profile: PatientProfile) -> dict:
-    """An interim 'ongoing' treatment response — the trial being monitored.
+    """The treatment response documented on the record at Phase 0.
 
-    Neutral by design: it documents that the member is on therapy and being
-    followed, NOT that it has failed. The 'inadequate' assessment is a Phase 1
-    output, written when Dr. Patel documents the response.
+    Normally an interim 'ongoing' entry, neutral by design: it documents that the
+    member is on therapy and being followed, NOT that it has failed. The
+    'inadequate' assessment is a Phase 1 output, written when the physician
+    documents the response.
+
+    A `partial` responder is the exception. "Six months in, some benefit, not
+    clearly a failure" is an assessment a clinician makes and writes down during
+    the trial, not a conclusion drawn at the end of it — and it is the ambiguity
+    the case turns on, so it has to be readable on the record rather than implied.
     """
     _, _, trial_start = _trial_dates(profile)
-    months = min(3, profile.trial_months)
-    return {
-        "drug": profile.first_line_drug,
-        "duration_months": months,
-        "outcome": "ongoing",
-        "notes": (
+    partial = profile.trial_outcome == "partial"
+    months = profile.trial_months if partial else min(3, profile.trial_months)
+    if partial:
+        notes = (
+            f"{months}-month trial of {profile.first_line_drug}: partial response, "
+            "not clearly inadequate. Escalation under consideration."
+        )
+    else:
+        notes = (
             f"Partial symptom control on {profile.first_line_drug}; "
             "continuing therapy and monitoring."
-        ),
+        )
+    return {
+        "drug": profile.first_line_drug,
+        # `partial` here is a clinical judgement about how well the drug worked. It
+        # is NOT the same axis as `ongoing` (still being followed) — the trial-review
+        # step reads this field to decide whether the trial supports a fast decision.
+        "outcome": "partial" if partial else "ongoing",
+        "duration_months": months,
+        "notes": notes,
         "documented_by": profile.managing_provider,
-        "documented_on": _iso(trial_start + timedelta(days=30 * months)),
+        "documented_on": _iso(trial_start + timedelta(days=profile.DAYS_PER_TRIAL_MONTH * months)),
     }
 
 
@@ -288,7 +329,7 @@ def build_claims(profile: PatientProfile) -> list[dict]:
     # intentionally omitted so the pharmacy record shows the missing refill the
     # narrative's second agent has to explain.
     for month in range(profile.trial_months):
-        refill_date = trial_start + timedelta(days=30 * month)
+        refill_date = trial_start + timedelta(days=profile.DAYS_PER_TRIAL_MONTH * month)
         if gap_start and gap_end and gap_start <= refill_date <= gap_end:
             continue  # missing refill during the clinically-explained hold
         claims.append(_mk_claim(
@@ -306,7 +347,7 @@ def build_claims(profile: PatientProfile) -> list[dict]:
 
     # Periodic follow-up visits (every ~2 months)
     for month in range(2, profile.trial_months, 2):
-        fu_date = trial_start + timedelta(days=30 * month + 3)
+        fu_date = trial_start + timedelta(days=profile.DAYS_PER_TRIAL_MONTH * month + 3)
         claims.append(_mk_claim(
             profile, seq, service="office visit - follow-up",
             adjudicated=fu_date,
@@ -487,8 +528,46 @@ def build_bundle(profile: PatientProfile) -> dict:
     therefore starts empty for a member; the profile's `case_type` still declares
     which scenario this member represents.
     """
-    return {
+    bundle = {
         "policy": build_policy(profile),
         "member": build_member(profile),
         "claims": build_claims(profile),
     }
+    _check_timeline(profile, bundle["policy"])
+    return bundle
+
+
+# Refuse to seed a policy whose term ends this soon. A term that has already run
+# out (or is about to) makes every case fail the eligibility gate at Step 1, which
+# looks like an agent bug rather than stale data — the failure mode this guard
+# exists to make loud.
+MIN_REMAINING_TERM_DAYS = 14
+
+
+def _check_timeline(profile: PatientProfile, policy: dict) -> None:
+    """Assert the two invariants the profile's derived dates are meant to hold."""
+    # Same anchor the profile measured its dates back from, so SEED_TODAY pins both.
+    today = datetime.combine(seed_today(), datetime.min.time())
+    _, _, trial_start = _trial_dates(profile)
+    trial_end = trial_start + timedelta(
+        days=profile.DAYS_PER_TRIAL_MONTH * profile.trial_months
+    )
+    if trial_end > today:
+        raise ValueError(
+            f"{profile.member_id} ({profile.name}): the first-line trial ends "
+            f"{_iso(trial_end)}, in the future. Documented history cannot run past "
+            "today — lower trial_months or raise post_trial_settle_days."
+        )
+
+    # A lapsed member is *supposed* to be outside the term; that is their scenario.
+    if profile.eligibility_status == "termed":
+        return
+
+    expiry_raw = (policy.get("effectivePeriod") or {}).get("expiryDate")
+    expiry = _parse(expiry_raw) if expiry_raw else None
+    if expiry and expiry - today < timedelta(days=MIN_REMAINING_TERM_DAYS):
+        raise ValueError(
+            f"{profile.member_id} ({profile.name}): policy term ends {_iso(expiry)}, "
+            f"within {MIN_REMAINING_TERM_DAYS} days of today. Every case would fail "
+            "the eligibility gate — shorten post_trial_settle_days or the trial."
+        )
