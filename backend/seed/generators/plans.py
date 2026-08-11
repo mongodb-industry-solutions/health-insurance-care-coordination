@@ -39,7 +39,7 @@ def _biologic_steps(loading_code, loading_label, maintenance_label, coinsurance,
     `covered` sets the default for every stage; `uncovered` names individual stage
     codes the plan does NOT fund. That per-stage granularity is what makes a
     restricted approval real data rather than narrative: a plan can pay for the drug
-    and still leave the member the screening panel, and the coverage check reports
+    and still leave the member with the screening panel, and the coverage check reports
     `restriction: "partial"` off exactly this difference.
     """
     return _steps(
