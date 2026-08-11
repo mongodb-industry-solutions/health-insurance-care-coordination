@@ -21,7 +21,36 @@ because they are factual benefit/eligibility calls, not clinical judgment — th
 "a human must close it" rule applies to medical-necessity denials.
 """
 
+import os
 from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
+
+
+# --- Dates are relative, not hardcoded ---------------------------------------
+# A profile's dates have to hold two invariants at the moment the demo runs:
+#   1. the first-line trial is entirely in the PAST (it is documented history), and
+#   2. the policy term still COVERS today (term = enrollment + 1 year, see
+#      `member_generator.build_policy`).
+# A hardcoded enrollment date satisfies both only for a few months, then silently
+# breaks one of them — an expired term turns every case into an eligibility denial
+# at Step 1, so profiles that exist to exercise the coverage or clinical steps
+# never reach them. Profiles therefore declare *offsets* and the ISO dates the
+# generator consumes are derived at seed time.
+
+# Set SEED_TODAY=YYYY-MM-DD to pin the anchor — for reproducing a specific run.
+_SEED_TODAY_ENV = "SEED_TODAY"
+
+
+def seed_today() -> date:
+    """The 'today' every profile's dates are measured back from."""
+    pinned = os.environ.get(_SEED_TODAY_ENV)
+    if pinned:
+        return datetime.strptime(pinned.strip(), "%Y-%m-%d").date()
+    return date.today()
+
+
+def _iso(day: date) -> str:
+    return day.isoformat()
 
 
 # A provider is one entity with one id, however many members they treat. Derived
@@ -73,8 +102,8 @@ class PatientProfile:
     considered_rxnorm: str
     managing_provider: str
 
-    # Timeline & guideline linkage
-    enrollment_date: str        # ISO date; anchors the claims timeline
+    # Timeline & guideline linkage. `enrollment_date` is derived (see below), not
+    # declared: it is a function of the trial length and today's date.
     plan_tier: str              # tier the requested therapy sits in (biologics: specialty)
     guideline_id: str
 
@@ -83,7 +112,14 @@ class PatientProfile:
 
     # Insurance / eligibility axis (defaults keep existing profiles unchanged)
     eligibility_status: str = "active"      # "active" | "termed"
-    coverage_end_date: str | None = None    # ISO date; set when coverage lapsed
+    # Days before today that coverage ended. Set only for a lapsed member (Frank);
+    # `coverage_end_date` below turns it into the ISO date the generator writes.
+    coverage_ended_days_ago: int | None = None
+
+    # Days between the end of the first-line trial and today. Keeps the documented
+    # history in the past while leaving the policy term (enrollment + 1 year) with
+    # ~2 months of runway, so a seeded database stays valid for a while.
+    post_trial_settle_days: int = 30
 
     # Additional standing diagnoses beyond the primary condition. Each is a full
     # diagnosis entry ({code, system, display, status}) merged into the member's
@@ -111,6 +147,37 @@ class PatientProfile:
     # them, not because anything reads them.
     agent_id: str | None = None
     agency_id: str | None = None
+
+    # --- Derived dates --------------------------------------------------------
+    # Mirrors `member_generator._trial_dates`: diagnosis lands 14 days after
+    # enrollment, the trial starts 14 days after that, and each trial month is
+    # modeled as 30 days. Enrollment is therefore however long ago the whole
+    # trajectory needs to have started for it to have finished
+    # `post_trial_settle_days` ago.
+    DX_OFFSET_DAYS = 14
+    TRIAL_START_OFFSET_DAYS = 14
+    DAYS_PER_TRIAL_MONTH = 30
+
+    @property
+    def enrollment_days_ago(self) -> int:
+        return (
+            self.DX_OFFSET_DAYS
+            + self.TRIAL_START_OFFSET_DAYS
+            + self.DAYS_PER_TRIAL_MONTH * self.trial_months
+            + self.post_trial_settle_days
+        )
+
+    @property
+    def enrollment_date(self) -> str:
+        """ISO enrollment date; anchors the policy term and the claims timeline."""
+        return _iso(seed_today() - timedelta(days=self.enrollment_days_ago))
+
+    @property
+    def coverage_end_date(self) -> str | None:
+        """ISO date coverage ended, or None while coverage is in force."""
+        if self.coverage_ended_days_ago is None:
+            return None
+        return _iso(seed_today() - timedelta(days=self.coverage_ended_days_ago))
 
 
 # --- Maria: the canonical clean-approval story from the narrative ------------
@@ -143,7 +210,6 @@ MARIA = PatientProfile(
     considered_therapy="secukinumab",
     considered_rxnorm="1656663",
     managing_provider="Dr. Patel",
-    enrollment_date="2025-10-01",
     plan_tier="specialty",
     guideline_id="CMG-RA-2026.3",
     case_type="clean_approval",
@@ -185,7 +251,6 @@ ROBERT = PatientProfile(
     considered_therapy="adalimumab",
     considered_rxnorm="327361",
     managing_provider="Dr. Okafor",
-    enrollment_date="2025-09-15",
     plan_tier="specialty",
     guideline_id="CMG-PSA-2026.1",
     case_type="clean_approval",
@@ -217,7 +282,6 @@ AISHA = PatientProfile(
     considered_therapy="ustekinumab",
     considered_rxnorm="1364454",
     managing_provider="Dr. Nguyen",
-    enrollment_date="2025-11-01",
     plan_tier="specialty",
     guideline_id="CMG-IBD-2026.2",
     case_type="human_review",
@@ -248,7 +312,6 @@ DAVID = PatientProfile(
     considered_therapy="secukinumab",
     considered_rxnorm="1656663",
     managing_provider="Dr. Patel",
-    enrollment_date="2026-02-01",
     plan_tier="specialty",
     guideline_id="CMG-RA-2026.3",
     case_type="denial",
@@ -282,7 +345,6 @@ GRACE = PatientProfile(
     considered_therapy="secukinumab",
     considered_rxnorm="1656663",
     managing_provider="Dr. Patel",
-    enrollment_date="2025-08-01",
     plan_tier="specialty",         # the therapy needs specialty; her plan doesn't cover it
     guideline_id="CMG-RA-2026.3",
     case_type="coverage_denial",
@@ -317,12 +379,13 @@ FRANK = PatientProfile(
     # source of truth for this member's care team. Distinct from Robert's
     # Dr. Okafor: Frank is the California case. The id comes from PROVIDERS.
     managing_provider="Dr. Ibrahim",
-    enrollment_date="2025-03-01",
     plan_tier="specialty",
     guideline_id="CMG-PSA-2026.1",
     case_type="ineligible",
     eligibility_status="termed",
-    coverage_end_date="2026-05-31",   # coverage ended before the (2026) request
+    # Coverage ended a month before the request — the eligibility gate must fail
+    # on a date that is in the past however long after seeding the demo runs.
+    coverage_ended_days_ago=30,
     tags=["psoriatic-arthritis", "coverage-lapsed", "ineligible"],
 )
 

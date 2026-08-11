@@ -223,6 +223,11 @@ class TrialHistoryResponse(BaseModel):
     # What the record claims, kept alongside the derived figure so a divergence
     # between the two is visible rather than silently overwritten.
     documented_months: float
+    # How well the drug worked, per the clinician ("partial", "inadequate",
+    # "ongoing"). A separate axis from duration: the trial can run its full course
+    # and still leave the escalation a judgement call.
+    response_quality: Optional[str] = None
+    partial_response: bool = False
     fill_count: int
     first_fill: Optional[str] = None
     last_fill: Optional[str] = None

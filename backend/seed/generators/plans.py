@@ -33,13 +33,22 @@ def _steps(*specs):
 
 
 def _biologic_steps(loading_code, loading_label, maintenance_label, coinsurance,
-                    covered=True):
-    """Standard specialty-biologic protocol: screening -> loading -> maintenance."""
+                    covered=True, uncovered=()):
+    """Standard specialty-biologic protocol: screening -> loading -> maintenance.
+
+    `covered` sets the default for every stage; `uncovered` names individual stage
+    codes the plan does NOT fund. That per-stage granularity is what makes a
+    restricted approval real data rather than narrative: a plan can pay for the drug
+    and still leave the member the screening panel, and the coverage check reports
+    `restriction: "partial"` off exactly this difference.
+    """
     return _steps(
         ("BASELINE_LABS", "Baseline labs and TB/infection screening",
-         covered, coinsurance, None),
-        (loading_code, loading_label, covered, coinsurance, None),
-        ("MAINTENANCE_DOSE", maintenance_label, covered, coinsurance, None),
+         covered and "BASELINE_LABS" not in uncovered, coinsurance, None),
+        (loading_code, loading_label,
+         covered and loading_code not in uncovered, coinsurance, None),
+        ("MAINTENANCE_DOSE", maintenance_label,
+         covered and "MAINTENANCE_DOSE" not in uncovered, coinsurance, None),
     )
 
 
@@ -116,9 +125,16 @@ PLANS = [
                 "tier": "specialty",
                 "covered": True,
                 "priorAuthRequired": True,
+                # The drug is funded; the pre-treatment screening panel is not. This is
+                # the plan's restricted benefit — the coverage check returns
+                # `restriction: "partial"`, the case still goes to clinical review
+                # (the therapy must be justified even if only part of it is paid for),
+                # and the outcome closes as `approved_restricted` with the member
+                # carrying the cost of the excluded stage. Robert Chen's path.
                 "steps": _biologic_steps(
                     "LOADING_DOSE", "Loading dose (weeks 0-1)",
                     "Maintenance dosing (biweekly, ongoing)", 0.2,
+                    uncovered=("BASELINE_LABS",),
                 ),
             },
         ],
