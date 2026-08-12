@@ -96,6 +96,9 @@ class TraceWatcher:
                 "step_id": step.get("stepId"),
                 "name": step.get("name"),
                 "memory_type": step.get("memoryType"),
+                # Which agent wrote it, straight off the record — so the UI does not
+                # have to infer it from the last turn_started it happened to see.
+                "recorded_by": step.get("recordedBy"),
                 "confidence": step.get("confidence"),
                 "detail": step.get("detail"),
             })

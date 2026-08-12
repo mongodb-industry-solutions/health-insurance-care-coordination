@@ -291,6 +291,7 @@ class AuditService:
         confidence: float,
         step_input=None,
         step_output=None,
+        recorded_by: str = None,
     ) -> dict:
         """Record one reasoning step on a trace, tagged by memory type.
 
@@ -302,6 +303,10 @@ class AuditService:
 
         `stepId` is assigned server-side, sequentially, so ids cannot collide or
         arrive out of order.
+
+        `recorded_by` names the agent that produced the step. Two agents write to one
+        trace, so an unattributed step leaves the record unable to say who reasoned
+        what. Each agent's tool supplies its own identity.
 
         Raises LookupError for a missing trace (-> 404) and ValueError for an
         invalid memory type or a closed trace (-> 400).
@@ -325,6 +330,7 @@ class AuditService:
         step = {
             "stepId": f"STP-{len(trace.get('steps') or []) + 1:03d}",
             "memoryType": memory_type,
+            "recordedBy": recorded_by,
             "name": name,
             "input": _as_object(step_input),
             "output": _as_object(step_output),

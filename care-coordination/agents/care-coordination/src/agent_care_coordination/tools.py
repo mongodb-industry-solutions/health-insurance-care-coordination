@@ -11,6 +11,11 @@ import requests
 from magenta_sdklanggraph import App
 
 
+# Who this agent is on the audit trail. Matches the `system:` vocabulary the trace
+# already uses for `audit.triggeredBy` and `review.closedBy`.
+AGENT_IDENTITY = "system:care_coordination_agent"
+
+
 def _get_backend_url() -> str:
     """Get the backend service URL. Configurable via env var, defaults to Kubernetes DNS."""
     return os.environ.get("BACKEND_URL", "http://backend-service:8000")
@@ -496,6 +501,10 @@ def register(app: App) -> None:
                     "name": name,
                     "detail": detail,
                     "confidence": confidence,
+                    # Stamped here, not asked of the model: two agents write to one
+                    # trace, and the record has to be able to attribute every step. A
+                    # value the LLM chose would be a value it could get wrong.
+                    "recorded_by": AGENT_IDENTITY,
                 },
                 timeout=5,
             )

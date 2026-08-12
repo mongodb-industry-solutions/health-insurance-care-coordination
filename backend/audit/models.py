@@ -40,6 +40,12 @@ class ContextSnapshot(BaseModel):
 class ReasoningStep(BaseModel):
     step_id: str = Field(alias="stepId")
     memory_type: str = Field(alias="memoryType")  # semantic|taxonomic|episodic|procedural
+    # Which agent recorded this step, e.g. "system:insurance_agent". Two agents write
+    # to one trace, so without this the record cannot answer "who decided this?" —
+    # a question both a reviewer reading the case and a regulator auditing it will
+    # ask. Stamped by each agent's own tool, not chosen by the model, so it cannot be
+    # got wrong. Optional: steps written before this field existed have none.
+    recorded_by: Optional[str] = Field(default=None, alias="recordedBy")
     name: Optional[str] = None
     input: Optional[Any] = None
     output: Optional[Any] = None
