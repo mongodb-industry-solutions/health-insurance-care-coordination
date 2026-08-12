@@ -24,16 +24,24 @@ _FINAL_DRAIN_SECONDS = 1.5
 logger = logging.getLogger(__name__)
 
 
-def _log_run_failure(task) -> None:
-    """Surface a crash inside a detached run.
+def _report_run_failure(task, publish) -> None:
+    """Surface a crash inside a detached run — to the log *and* to the client.
 
-    The orchestration future is never awaited — the run has to outlive the stream — so
-    without this an exception would vanish and the case would just stop.
+    The orchestration future is never awaited (the run has to outlive the stream), so
+    without this an exception would vanish. Logging alone is not enough: the stream
+    ends only on a terminal event, so a crashed run left the browser watching
+    keepalives forever with no way to know the case had died. `error` is terminal, so
+    publishing it here lets the client close cleanly and say what happened.
     """
     try:
         task.result()
     except Exception as e:
         logger.exception("authorization run failed: %s", e)
+        try:
+            publish("error", {"agent": None, "detail": f"{type(e).__name__}: {e}"})
+        except Exception:
+            # The subscriber is already gone (client disconnected). Nothing to tell.
+            logger.debug("could not publish run failure; no subscriber")
 
 
 def get_workflow_service(
@@ -193,8 +201,8 @@ async def start_authorization(
         # must still finish.
         task = loop.run_in_executor(None, lambda: run(publish=publish))
         # Nothing awaits that future, so an exception inside the run would otherwise be
-        # swallowed and the case would simply stop with no explanation anywhere.
-        task.add_done_callback(_log_run_failure)
+        # swallowed: the case would stop and the stream would go on sending keepalives.
+        task.add_done_callback(lambda t: _report_run_failure(t, publish))
 
         try:
             watcher.start()

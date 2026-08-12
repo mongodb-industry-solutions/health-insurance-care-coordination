@@ -94,9 +94,16 @@ class MedicalDirectorReviewService:
     # --- the decision ---------------------------------------------------------
 
     def _linked_claim_id(self, member_id: str, trace_id: str) -> str:
+        """The `claimId` of the claim this trace decided, if there is one.
+
+        Only `claimId` — never `_id`. `ClaimRepository` keys on the business id, so an
+        ObjectId returned from here would look like a found claim and then fail the
+        update, reporting a cascade error for a claim that exists. A claim without a
+        `claimId` is better treated as no linked claim.
+        """
         for claim in self.claim_repo.find_by_member(member_id) or []:
             if claim.get("linkedAuditTraceId") == trace_id:
-                return claim.get("claimId") or claim.get("_id")
+                return claim.get("claimId")
         return None
 
     def _open_action_id(self, member_id: str, trace_id: str) -> str:

@@ -282,6 +282,29 @@ class AuditService:
             self.repository.insert_trace(trace)
         return {k: v for k, v in trace.items() if k != "_id"}
 
+    @staticmethod
+    def _normalize_agent_identity(recorded_by: str) -> str:
+        """Validate step attribution against the same convention closures use.
+
+        `_assert_closable` already requires a `system:` identity to close a trace; a
+        step written into the same record should not be held to a weaker standard, or
+        the attribution the audit trail depends on becomes whatever a caller typed.
+
+        Absent is allowed — steps predate this field, and it stays optional. An empty
+        or whitespace-only value is normalized to absent rather than stored, so
+        "unattributed" has one representation instead of three.
+        """
+        recorded_by = (recorded_by or "").strip()
+        if not recorded_by:
+            return None
+        if not recorded_by.startswith("system:"):
+            raise ValueError(
+                f"recorded_by must be a system identity, e.g. 'system:insurance_agent'; "
+                f"got {recorded_by!r}. Steps are written by agents, not by people — a "
+                "human determination belongs in review.closedBy."
+            )
+        return recorded_by
+
     def append_step(
         self,
         trace_id: str,
@@ -317,6 +340,7 @@ class AuditService:
                 f"memory_type must be one of {MEMORY_TYPES}, got {memory_type!r}. "
                 "Every step must declare one."
             )
+        recorded_by = self._normalize_agent_identity(recorded_by)
         trace = self.repository.get_by_key(trace_id)
         if not trace:
             raise LookupError(f"Trace {trace_id} not found")

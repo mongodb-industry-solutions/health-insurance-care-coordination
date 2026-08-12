@@ -12,9 +12,14 @@ targeting) and is not wired up yet — the agent has no registered workspace. Mo
 selection lives here so that when it is, only this file changes.
 
 `/invoke` blocks until the agent finishes its whole run, which for a prior
-authorization is minutes. Callers must therefore not await it inside a request:
-`AuthorizationWorkflowService.start` hands it to FastAPI's BackgroundTasks so the
-HTTP response returns immediately and the run continues after it.
+authorization is minutes. It is also plain synchronous `urllib`, so it blocks the
+thread it is called on and must never be called on the event loop.
+
+That blocking is what makes the sequential chain work — a turn returning *is* the
+signal the agent is done — so the caller does not try to avoid it, it moves it off
+the loop: `start_authorization` hands the whole orchestration to
+`loop.run_in_executor`, detached, and streams progress read off the audit trace
+meanwhile. Anything reusing this invoker owes it the same treatment.
 """
 
 import json

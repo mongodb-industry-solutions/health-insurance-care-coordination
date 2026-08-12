@@ -82,6 +82,13 @@ class TraceWatcher:
         trace_id = trace.get("traceId")
         if trace_id and trace_id != self._seen_trace:
             self._seen_trace = trace_id
+            # A different trace is a different case: its steps start at 1 again and it
+            # has its own decision and closure. Carrying the previous trace's cursors
+            # over would silently swallow the first N steps of this one.
+            self._seen_steps = 0
+            self._seen_decision = None
+            self._seen_escalated = False
+            self._seen_closed = False
             # The first thing the frontend learns that it could not know from `start`.
             self._emit("trace_opened", {
                 "trace_id": trace_id,

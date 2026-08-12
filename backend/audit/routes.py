@@ -143,7 +143,9 @@ async def append_reasoning_step(
 
     `step_id` is assigned server-side. `step_input` / `step_output` accept JSON or
     prose. `recorded_by` names the agent writing the step — each agent's tool passes
-    its own identity, so the trace can attribute every step.
+    its own identity, so the trace can attribute every step. It must be a `system:`
+    identity, matching the convention agent closures already follow; omit it rather
+    than sending a blank.
     """
     try:
         return service.append_step(

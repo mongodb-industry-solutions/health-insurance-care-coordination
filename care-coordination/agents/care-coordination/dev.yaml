@@ -1,6 +1,8 @@
 # Local services exposed by the app during `agentic dev`.
 # Most host ports are assigned randomly so multiple agents can run at once.
-# The playground stays pinned to 3000 because it is the primary browser UI.
+# The playground is pinned to 3002. Each agent runs its own local stack, so the two
+# cannot share the default 3000 — the Insurance Agent takes 3001, this one 3002, and
+# the backend's CARE_AGENT_URL must agree.
 # To pin another service, uncomment its block, change the port, and restart
 # the local stack.
 services:
