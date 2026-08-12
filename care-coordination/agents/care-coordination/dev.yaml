@@ -5,7 +5,7 @@
 # the local stack.
 services:
   playground:
-    port: 3000
+    port: 3002
   # oe:
   #   port: 8000  # Orchestration Engine HTTP API.
   # aer:
