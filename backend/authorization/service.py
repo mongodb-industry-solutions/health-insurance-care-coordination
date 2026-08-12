@@ -228,7 +228,7 @@ class AuthorizationWorkflowService:
 
     # --- the run --------------------------------------------------------------
 
-    def orchestrate(self, member_id: str, opening_message: str) -> list:
+    def orchestrate(self, member_id: str, opening_message: str, publish=None) -> list:
         """Drive the case to a stopping point, one agent turn at a time.
 
         `/invoke` blocks until an agent's turn is complete, so this is plain sequential
@@ -243,7 +243,13 @@ class AuthorizationWorkflowService:
             agents wrote — never from an assumption about what should have happened
           * a failed turn stops the chain, because invoking the next agent on top of a
             half-finished case makes the failure harder to see, not easier
+
+        `publish(event, data)` is optional and mirrors the turn structure to a live
+        viewer. It carries the handoffs, which is what fills the 10-20 second silences
+        while an LLM works and no step has been recorded yet. A run with no viewer
+        passes None and behaves identically.
         """
+        emit = publish or (lambda event, data=None: None)
         turns = []
         # Learned from the member's pending action after the first turn, then held: the
         # case's identity for the rest of the run, so closure cannot make it vanish.
@@ -255,6 +261,7 @@ class AuthorizationWorkflowService:
             if action in (DONE, AWAITING_MEDICAL_DIRECTOR, STALLED):
                 logger.warning("case for %s stops: %s", member_id, action)
                 turns.append({"action": action, "invoked": None})
+                emit("stopped", {"reason": action, "trace_id": trace_id, "turns": len(turns) - 1})
                 break
 
             if action == NEEDS_START:
@@ -265,11 +272,13 @@ class AuthorizationWorkflowService:
                 agent, message = INSURANCE_AGENT, self.compose_routing_message(member_id)
             else:
                 logger.error("unrecognised next action %r for %s", action, member_id)
+                emit("error", {"detail": f"unrecognised next action {action!r}"})
                 break
 
             logger.warning(
                 "case for %s turn %d: %s -> %s agent", member_id, turn + 1, action, agent
             )
+            emit("turn_started", {"turn": turn + 1, "action": action, "agent": agent})
             result = self.invoker.invoke(agent, message)
             turns.append({"action": action, "invoked": agent, "ok": result.get("ok")})
 
@@ -280,10 +289,12 @@ class AuthorizationWorkflowService:
                     agent,
                     result.get("error"),
                 )
+                emit("error", {"agent": agent, "detail": result.get("error")})
                 break
 
             if trace_id is None:
                 trace_id = self._resolve_trace_id(member_id)
+            emit("turn_finished", {"turn": turn + 1, "agent": agent, "trace_id": trace_id})
 
             # An agent that returned successfully without moving the case forward would
             # otherwise have this loop re-issue the same instruction until the cap.
@@ -295,6 +306,13 @@ class AuthorizationWorkflowService:
                     agent,
                     action,
                 )
+                emit("error", {
+                    "agent": agent,
+                    "detail": (
+                        f"the {agent} agent finished but recorded nothing, so the case "
+                        f"still needs {action}"
+                    ),
+                })
                 break
         else:
             logger.error(
@@ -302,6 +320,7 @@ class AuthorizationWorkflowService:
                 member_id,
                 _MAX_TURNS,
             )
+            emit("error", {"detail": f"stopped after the {_MAX_TURNS}-turn cap"})
 
         return turns
 
@@ -324,8 +343,8 @@ class AuthorizationWorkflowService:
         message = self.compose_agent_message(case, as_of)
         target = self.invoker.describe(INSURANCE_AGENT)
 
-        def run():
-            self.orchestrate(member_id, message)
+        def run(publish=None):
+            self.orchestrate(member_id, message, publish=publish)
 
         return {
             "can_start": True,
