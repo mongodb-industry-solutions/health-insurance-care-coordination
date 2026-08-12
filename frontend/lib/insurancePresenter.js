@@ -191,14 +191,19 @@ export function toAuthorizationHistory(traces = []) {
 }
 
 /**
- * Columns and attribute rows for the plan-comparison table.
+ * Treatment-coverage matrix: which treatments the plan covers, at which tier,
+ * and requiring what. Answers "what's covered" — dollar figures belong to the
+ * premium/cost tool instead.
  *
- * The data model only guarantees the tiers embedded on the member's own plan, so
- * the honest comparison is Standard vs Specialty rather than sibling plans. The
- * table takes an array of columns, so a future cross-plan endpoint extends this
- * horizontally without a rewrite.
+ * Rows are grouped by `condition`, since that is how a member reads it ("what's
+ * covered for my condition") rather than as a treatment catalog. Each treatment
+ * entry declares a single tier, so it fills only the matching column.
+ *
+ * @param {object} plan
+ * @param {string} activeTier  The member's enrolled tier, for the highlight.
+ * @param {object} conditionNames  { [icd10Code]: displayName } from the member's diagnoses.
  */
-export function toTierComparison(plan, activeTier) {
+export function toTreatmentCoverage(plan, activeTier, conditionNames = {}) {
   const tiers = pick(plan?.coverage, "tiers") ?? {};
 
   const columns = Object.entries(tiers).map(([name, tier]) => ({
@@ -208,45 +213,57 @@ export function toTierComparison(plan, activeTier) {
     tier,
   }));
 
-  const rows = [
-    {
-      id: "covered",
-      label: "Covered",
-      value: (tier) => (tier.covered ? "✓" : "—"),
-    },
-    {
-      id: "prior-auth",
-      label: "Prior auth required",
-      value: (tier) =>
-        pick(tier, "prior_auth_required", "priorAuthRequired") ? "Yes" : "No",
-    },
-    {
-      id: "cost-share",
-      label: "Cost share",
-      value: (tier) =>
-        tier.coinsurance != null
-          ? `${Math.round(tier.coinsurance * 100)}% coinsurance`
-          : tier.copay != null
-            ? `${formatAmount(tier.copay)} copay`
-            : "—",
-    },
-    {
-      id: "deductible",
-      label: "Deductible",
-      value: (tier) =>
-        tier.deductible != null ? formatAmount(tier.deductible) : "—",
-    },
-    {
-      id: "oop-max",
-      label: "Out-of-pocket max",
-      value: (tier) => {
-        const max = pick(tier, "out_of_pocket_max", "outOfPocketMax");
-        return max != null ? formatAmount(max) : "—";
-      },
-    },
-  ];
+  const rows = (plan?.treatments ?? []).map((treatment, index) => {
+    const steps = treatment.steps ?? [];
+    const coveredSteps = steps.filter((step) => step.covered !== false);
+    const uncoveredSteps = steps.filter((step) => step.covered === false);
 
-  return { columns, rows };
+    return {
+      id: `${pick(treatment, "treatment_code", "treatmentCode") ?? index}-${
+        treatment.condition ?? "any"
+      }`,
+      label:
+        pick(treatment, "treatment_name", "treatmentName") ??
+        treatment.drug ??
+        "Treatment",
+      condition: treatment.condition,
+      tier: String(treatment.tier ?? "").toLowerCase(),
+      covered: treatment.covered !== false,
+      priorAuthRequired: Boolean(
+        pick(treatment, "prior_auth_required", "priorAuthRequired")
+      ),
+      // The model represents partial coverage as a mix of covered steps.
+      isPartial: coveredSteps.length > 0 && uncoveredSteps.length > 0,
+      steps: steps.map((step, stepIndex) => ({
+        id: pick(step, "step_code", "stepCode") ?? `step-${stepIndex}`,
+        name:
+          pick(step, "step_name", "stepName") ??
+          pick(step, "step_code", "stepCode"),
+        covered: step.covered !== false,
+      })),
+    };
+  });
+
+  // Group by condition, preserving the order conditions first appear.
+  const groups = [];
+  rows.forEach((row) => {
+    const code = row.condition ?? "any";
+    let group = groups.find((candidate) => candidate.id === code);
+
+    if (!group) {
+      group = {
+        id: code,
+        label: conditionNames[code] ?? (row.condition ? code : "All conditions"),
+        code: conditionNames[code] ? code : null,
+        rows: [],
+      };
+      groups.push(group);
+    }
+
+    group.rows.push(row);
+  });
+
+  return { columns, groups };
 }
 
 /**
