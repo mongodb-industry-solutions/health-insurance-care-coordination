@@ -131,9 +131,10 @@ async def append_reasoning_step(
     confidence: float,
     step_input: str = None,
     step_output: str = None,
+    recorded_by: str = None,
     service: AuditService = Depends(get_audit_service),
 ):
-    """Insurance Agent, steps 1-2: record one reasoning step, tagged by memory type.
+    """Record one reasoning step on a trace, tagged by memory type.
 
     `memory_type` must be semantic, taxonomic, episodic or procedural — it is what
     makes the four-memory-type claim verifiable. Note that `episodic` and
@@ -141,7 +142,10 @@ async def append_reasoning_step(
     to close it, so the administrative gates use `semantic` / `taxonomic`.
 
     `step_id` is assigned server-side. `step_input` / `step_output` accept JSON or
-    prose.
+    prose. `recorded_by` names the agent writing the step — each agent's tool passes
+    its own identity, so the trace can attribute every step. It must be a `system:`
+    identity, matching the convention agent closures already follow; omit it rather
+    than sending a blank.
     """
     try:
         return service.append_step(
@@ -152,6 +156,7 @@ async def append_reasoning_step(
             confidence=confidence,
             step_input=step_input,
             step_output=step_output,
+            recorded_by=recorded_by,
         )
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))

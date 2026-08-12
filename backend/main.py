@@ -15,6 +15,7 @@ from audit.routes import router as audit_router
 from plans.routes import router as plans_router
 from notifications.routes import router as notifications_router
 from admin.routes import router as admin_router
+from authorization.routes import router as authorization_router
 
 load_dotenv()
 
@@ -66,3 +67,5 @@ app.include_router(audit_router)
 app.include_router(plans_router)
 app.include_router(notifications_router)
 app.include_router(admin_router)
+# Frontend-facing workflow entry points (Start Process, progress, human closure).
+app.include_router(authorization_router)
