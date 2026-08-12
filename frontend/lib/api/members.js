@@ -57,6 +57,16 @@ export function fetchPlans() {
   return apiFetch("/api/plans");
 }
 
+/**
+ * GET /api/audit/traces/{traceId} — one decision trace.
+ *
+ * Used to expand a claim: the claim carries `linkedAuditTraceId`, so there is no
+ * need for a claim-id lookup endpoint.
+ */
+export function fetchTrace(traceId) {
+  return apiFetch(`/api/audit/traces/${traceId}`);
+}
+
 /** GET /api/audit/member/{memberId}/traces — prior-authorization decisions. */
 export function fetchMemberTraces(memberId) {
   return apiFetch(`/api/audit/member/${memberId}/traces`);

@@ -1,0 +1,214 @@
+/* Same dot-and-line language as the Clinical Context timeline, with dot color
+   carrying the actor rather than recency. */
+
+.segment + .segment {
+  margin-top: 8px;
+}
+
+.segmentHeader {
+  margin-bottom: 12px;
+}
+
+.segmentTitle {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--color-charcoal);
+}
+
+.segmentMeta {
+  margin: 3px 0 0;
+  font-family: var(--font-serif);
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.tag {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background-color: var(--color-fill);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--color-muted);
+}
+
+.timeline {
+  position: relative;
+  margin: 0;
+  padding: 4px 0 0 26px;
+  list-style: none;
+}
+
+.timeline::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 5px;
+  width: 1px;
+  background-color: var(--color-border);
+}
+
+.node {
+  position: relative;
+  padding-bottom: 18px;
+}
+
+.node:last-child {
+  padding-bottom: 0;
+}
+
+.dot {
+  position: absolute;
+  top: 4px;
+  left: -26px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+}
+
+/* Actor colors: agent reasoning, mechanical gate, human. */
+.dotAgent {
+  background-color: var(--color-green);
+}
+
+.dotGate {
+  background-color: #6b8ba4;
+}
+
+.dotHuman {
+  background-color: #c9791a;
+}
+
+.nodeHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.nodeTitle {
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--color-charcoal);
+}
+
+.badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background-color: var(--color-green-tint);
+  color: var(--color-green);
+}
+
+.badgeGate {
+  background-color: #eaf1f6;
+  color: #3d5a70;
+}
+
+.confidence {
+  margin-left: auto;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.detail {
+  margin: 4px 0 0;
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.5;
+  color: #333333;
+}
+
+.role {
+  margin: 4px 0 0;
+  font-family: var(--font-serif);
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+/* Outcome summary closing the sequence. */
+.outcome {
+  margin-top: 14px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background-color: #e3f5ea;
+}
+
+.outcomeDenied {
+  background-color: #ffeae5;
+}
+
+.outcomePending {
+  background-color: #fef7e3;
+}
+
+.outcomeLabel {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.outcomeDecision {
+  margin: 5px 0 0;
+  font-family: var(--font-serif);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--color-charcoal);
+}
+
+.outcomeRationale {
+  margin: 7px 0 0;
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.5;
+  color: #333333;
+}
+
+.override {
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  font-family: var(--font-serif);
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: #944f01;
+}
+
+/* "Led to" connector between chained traces. */
+.link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 6px 5px;
+  padding-left: 16px;
+  border-left: 1px dashed var(--color-border);
+  font-family: var(--font-serif);
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.empty {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--color-muted);
+}

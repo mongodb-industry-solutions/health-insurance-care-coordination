@@ -1,7 +1,15 @@
 "use client";
 
+import CareGapsTool from "@/components/careGapsTool/CareGapsTool";
+import ClaimHistoryTool from "@/components/claimHistoryTool/ClaimHistoryTool";
+import ClinicalHistoryTool from "@/components/clinicalHistoryTool/ClinicalHistoryTool";
+import ComparisonTable from "@/components/comparisonTable/ComparisonTable";
+import DecisionTracingTool from "@/components/decisionTracingTool/DecisionTracingTool";
 import Skeleton from "@/components/skeleton/Skeleton";
-import { toTimelineEvents } from "@/lib/memberPresenter";
+import {
+  toCrossPlanCoverage,
+  toTierComparison,
+} from "@/lib/insurancePresenter";
 import { useToolData } from "./useToolData";
 import styles from "./ToolContent.module.css";
 
@@ -16,107 +24,6 @@ function money(amount, currency = "USD") {
   return `${symbol}${Number(amount).toLocaleString("en-US", {
     maximumFractionDigits: 2,
   })}`;
-}
-
-/** Claim History — every claim on the member, most recent first. */
-function ClaimHistory({ claims }) {
-  if (!claims.length) {
-    return <p className={styles.empty}>No claims on record.</p>;
-  }
-
-  const sorted = [...claims].sort((a, b) =>
-    String(pick(b, "service_date", "serviceDate") ?? "").localeCompare(
-      String(pick(a, "service_date", "serviceDate") ?? "")
-    )
-  );
-
-  return (
-    <>
-      <p className={styles.intro}>
-        {claims.length} claim{claims.length === 1 ? "" : "s"} on record.
-      </p>
-
-      <ul className={styles.list}>
-        {sorted.map((claim) => (
-          <li key={pick(claim, "claim_id", "claimId")} className={styles.item}>
-            <div className={styles.itemHeader}>
-              <span className={styles.itemTitle}>
-                {pick(claim, "procedure_desc", "procedureDesc") ??
-                  claim.service ??
-                  "Claim"}
-              </span>
-              <span className={styles.itemAmount}>
-                {money(
-                  pick(claim, "member_owed", "memberOwed"),
-                  claim.currency
-                ) ?? "—"}
-              </span>
-            </div>
-            <p className={styles.itemMeta}>
-              {[
-                pick(claim, "service_date", "serviceDate"),
-                claim.provider?.name,
-                claim.status,
-                pick(claim, "denial_reason", "denialReason"),
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-          </li>
-        ))}
-      </ul>
-    </>
-  );
-}
-
-/** Recent Care Gaps — breaks in refill cadence found in pharmacy claims. */
-function RecentCareGaps({ data }) {
-  const gaps = data?.gaps ?? [];
-  const cadence = pick(data, "expected_cadence_days", "expectedCadenceDays");
-
-  if (!gaps.length) {
-    return (
-      <p className={styles.empty}>
-        No refill gaps detected. Fills are within the expected
-        {cadence ? ` ${cadence}-day` : ""} cadence.
-      </p>
-    );
-  }
-
-  return (
-    <>
-      <p className={styles.intro}>
-        {gaps.length} gap{gaps.length === 1 ? "" : "s"} found against an expected
-        {cadence ? ` ${cadence}-day` : ""} refill cadence. A gap is not
-        necessarily a discontinuation — it may have a clinical explanation.
-      </p>
-
-      <ul className={styles.list}>
-        {gaps.map((gap, index) => (
-          <li key={`${gap.drug}-${index}`} className={styles.item}>
-            <div className={styles.itemHeader}>
-              <span className={styles.itemTitle}>{gap.drug}</span>
-              <span className={styles.itemAmount}>
-                {pick(gap, "gap_days", "gapDays")} days
-              </span>
-            </div>
-            <p className={styles.itemMeta}>
-              {[
-                `${pick(gap, "previous_fill", "previousFill")} → ${pick(
-                  gap,
-                  "next_fill",
-                  "nextFill"
-                )}`,
-                `~${pick(gap, "approx_missed_fills", "approxMissedFills")} missed fill(s)`,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-          </li>
-        ))}
-      </ul>
-    </>
-  );
 }
 
 /** Premium Calculation — what the member pays, and what care costs on top. */
@@ -196,135 +103,117 @@ function PremiumCalculation({ data }) {
   );
 }
 
-/** Plan Comparison — the member's plan against the others on offer. */
-function PlanComparison({ data }) {
-  const plans = data?.plans ?? [];
+/**
+ * Plan Comparison — the tiers on the member's own plan, side by side.
+ *
+ * Only the tiers embedded on this plan are guaranteed by the data model, so the
+ * comparison is Standard vs Specialty. ComparisonTable takes an array of columns,
+ * so a cross-plan endpoint would extend this horizontally without a rewrite.
+ */
+function PlanComparison({ data, member }) {
+  const plan = data?.plan;
+  const activeTier = member?.eligibility?.tier;
+  const { columns, rows } = toTierComparison(plan, activeTier);
 
-  if (!plans.length) {
-    return <p className={styles.empty}>No plans available to compare.</p>;
+  if (!columns.length) {
+    return <p className={styles.empty}>No tier information on this plan.</p>;
   }
+
+  const planName =
+    pick(plan, "plan_name", "planName") ?? pick(plan, "plan_id", "planId");
+  const planMeta = [
+    pick(plan, "plan_type", "planType"),
+    plan?.network?.replaceAll("_", " "),
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <>
       <p className={styles.intro}>
-        The member&apos;s current plan is highlighted. Specialty-tier coverage is
-        what determines whether a biologic therapy can be approved at all.
+        {planName}
+        {planMeta && ` — ${planMeta}`}. The member&apos;s current tier is
+        highlighted; specialty-tier coverage is what determines whether a biologic
+        therapy can be approved at all.
       </p>
 
-      <ul className={styles.list}>
-        {plans.map((plan) => {
-          const planId = pick(plan, "plan_id", "planId");
-          const isCurrent = planId === data.currentPlanId;
-          const tiers = pick(plan.coverage, "tiers") ?? {};
-          const specialty = tiers.specialty ?? tiers.Specialty;
+      <ComparisonTable columns={columns} rows={rows} attributeLabel="Attribute" />
 
-          return (
-            <li key={planId}>
-              <div
-                className={`${styles.planCard} ${
-                  isCurrent ? styles.planCardCurrent : ""
-                }`}
-              >
-                <p
-                  className={`${styles.planName} ${
-                    isCurrent ? styles.planNameCurrent : ""
-                  }`}
-                >
-                  {pick(plan, "plan_name", "planName") ?? planId}
-                  {isCurrent && <span className={styles.badge}>Current</span>}
-                </p>
-                <p className={styles.itemMeta}>
-                  {[
-                    pick(plan, "plan_type", "planType"),
-                    plan.network?.replaceAll("_", " "),
-                    specialty?.covered
-                      ? "specialty tier covered"
-                      : "specialty tier not covered",
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </p>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+      <CrossPlanCoverage
+        plans={data?.plans ?? []}
+        currentPlanId={pick(plan, "plan_id", "planId")}
+        tierName={activeTier}
+      />
     </>
   );
 }
 
-/** Clinical History Review — the full record, read from the member document. */
-function ClinicalHistoryReview({ member }) {
-  const history = member?.clinical_history ?? member?.clinicalHistory ?? {};
-  const diagnoses = history.diagnoses ?? [];
-  const medications = history.medications ?? [];
-  const events = toTimelineEvents(member).filter((event) => !event.isCurrent);
+/**
+ * How the rest of the catalog treats the member's tier. Deliberately framed as
+ * the catalog, not "plans available to you" — nothing models enrollment
+ * eligibility, and premiums live on the Policy rather than the Plan, so this
+ * cannot speak to what switching would cost.
+ */
+function CrossPlanCoverage({ plans, currentPlanId, tierName }) {
+  const entries = toCrossPlanCoverage(plans, currentPlanId, tierName);
+  if (!entries.length) return null;
+
+  const tierLabel = String(tierName ?? "specialty").toLowerCase();
 
   return (
     <>
+      <h4 className={styles.sectionLabel}>
+        {/* Sentence case: the tier name is lowercased for mid-sentence use in
+            the body copy below, so only the heading's first letter is raised. */}
+        {tierLabel.charAt(0).toUpperCase() + tierLabel.slice(1)} coverage across
+        plans
+      </h4>
       <p className={styles.intro}>
-        The complete coded record and narrative notes behind this member&apos;s
-        case.
+        Every plan in the catalog, and how each treats the {tierLabel} tier. Plan
+        records carry no premium, so this compares coverage only — not cost of
+        switching.
       </p>
 
-      {diagnoses.length > 0 && (
-        <>
-          <h4 className={styles.sectionLabel}>Diagnoses</h4>
-          <ul className={styles.list}>
-            {diagnoses.map((diagnosis) => (
-              <li key={diagnosis.code} className={styles.item}>
-                <div className={styles.itemHeader}>
-                  <span className={styles.itemTitle}>{diagnosis.display}</span>
-                  <span className={styles.itemAmount}>{diagnosis.status}</span>
-                </div>
-                <p className={styles.itemMeta}>
-                  {diagnosis.system} {diagnosis.code}
+      <ul className={styles.list}>
+        {entries.map((entry) => (
+          <li key={entry.id}>
+            <div
+              className={`${styles.planCard} ${
+                entry.isCurrent ? styles.planCardCurrent : ""
+              }`}
+            >
+              <div className={styles.itemHeader}>
+                <p
+                  className={`${styles.planName} ${
+                    entry.isCurrent ? styles.planNameCurrent : ""
+                  }`}
+                >
+                  {entry.name}
+                  {entry.isCurrent && (
+                    <span className={styles.badge}>Current</span>
+                  )}
                 </p>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+                <span className={styles.itemAmount}>
+                  {entry.covered ? entry.costShare ?? "Covered" : "Not covered"}
+                </span>
+              </div>
 
-      {medications.length > 0 && (
-        <>
-          <h4 className={styles.sectionLabel}>Medications</h4>
-          <ul className={styles.list}>
-            {medications.map((medication) => (
-              <li key={`${medication.code}-${medication.display}`} className={styles.item}>
-                <div className={styles.itemHeader}>
-                  <span className={styles.itemTitle}>{medication.display}</span>
-                  <span className={styles.itemAmount}>{medication.status}</span>
-                </div>
-                {medication.reason && (
-                  <p className={styles.itemMeta}>{medication.reason}</p>
-                )}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-
-      {events.length > 0 && (
-        <>
-          <h4 className={styles.sectionLabel}>Notes & responses</h4>
-          <ul className={styles.list}>
-            {events.map((event) => (
-              <li key={event.id} className={styles.item}>
-                <div className={styles.itemHeader}>
-                  <span className={styles.itemTitle}>
-                    {event.eventType ?? "Note"}
-                  </span>
-                  <span className={styles.itemAmount}>{event.date}</span>
-                </div>
-                <p className={styles.itemMeta}>
-                  {[event.actor, event.description].filter(Boolean).join(" — ")}
-                </p>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+              <p className={styles.itemMeta}>
+                {[
+                  entry.planType,
+                  entry.network,
+                  entry.exclusions.length > 0 &&
+                    `excludes ${entry.exclusions
+                      .map((service) => service.replaceAll("_", " "))
+                      .join(", ")}`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            </div>
+          </li>
+        ))}
+      </ul>
     </>
   );
 }
@@ -337,8 +226,11 @@ export default function ToolContent({ toolId, member }) {
   const { data, loading, error } = useToolData(toolId, member);
 
   if (toolId === "clinical-history-review") {
-    return <ClinicalHistoryReview member={member} />;
+    return <ClinicalHistoryTool member={member} />;
   }
+
+  // Fetches nothing — it owns its own brief skeleton before the empty state.
+  if (toolId === "recent-care-gaps") return <CareGapsTool />;
 
   if (loading) return <Skeleton lines={7} />;
 
@@ -348,10 +240,14 @@ export default function ToolContent({ toolId, member }) {
 
   if (!data) return <Skeleton lines={7} />;
 
-  if (toolId === "claim-history") return <ClaimHistory claims={data.claims} />;
+  if (toolId === "claim-history")
+    return <ClaimHistoryTool claims={data.claims} />;
+  if (toolId === "decision-tracing")
+    return <DecisionTracingTool traces={data.traces} />;
   if (toolId === "recent-care-gaps") return <RecentCareGaps data={data} />;
   if (toolId === "premium-calculation") return <PremiumCalculation data={data} />;
-  if (toolId === "plan-comparison") return <PlanComparison data={data} />;
+  if (toolId === "plan-comparison")
+    return <PlanComparison data={data} member={member} />;
 
   return <p className={styles.empty}>This tool has no content yet.</p>;
 }

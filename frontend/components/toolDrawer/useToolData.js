@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import {
   fetchMemberClaims,
+  fetchMemberTraces,
   fetchPlan,
   fetchPlans,
   fetchPolicy,
-  fetchRefillGaps,
 } from "@/lib/api/members";
 
 /**
@@ -13,10 +13,11 @@ import {
  * There is no single `/tools/{toolId}` endpoint — each tool maps onto routes that
  * already exist in the backend, so nothing here is a placeholder:
  *   claim-history           → /api/claims/member/{id}
- *   recent-care-gaps        → /api/claims/member/{id}/refill-gaps
+ *   decision-tracing        → /api/audit/member/{id}/traces
  *   premium-calculation     → /api/policies/{policyId} + /api/plans/{planId}
- *   plan-comparison         → /api/plans (+ the member's own plan)
+ *   plan-comparison         → the same pair, plus /api/plans for the catalog
  *   clinical-history-review → already on the member document, no request
+ *   recent-care-gaps        → nothing; no care-gap object exists (see CareGapsTool)
  *
  * @param {string|null} toolId
  * @param {object|null} member  The loaded member document.
@@ -43,23 +44,27 @@ export function useToolData(toolId, member) {
         if (toolId === "claim-history") {
           const response = await fetchMemberClaims(memberId);
           if (active) setData({ claims: response.claims ?? [] });
-        } else if (toolId === "recent-care-gaps") {
-          const response = await fetchRefillGaps(memberId);
-          if (active) setData(response);
-        } else if (toolId === "premium-calculation") {
+        } else if (toolId === "decision-tracing") {
+          const response = await fetchMemberTraces(memberId);
+          if (active) setData({ traces: response.traces ?? [] });
+        } else if (
+          toolId === "premium-calculation" ||
+          toolId === "plan-comparison"
+        ) {
+          // Same policy → plan pair for both tools; they are separate drawer
+          // entries so each fetches independently.
           const policy = await fetchPolicy(policyId);
           const planId = policy.planId ?? policy.plan_id;
           const plan = planId ? await fetchPlan(planId) : null;
-          if (active) setData({ policy, plan });
-        } else if (toolId === "plan-comparison") {
-          const policy = await fetchPolicy(policyId);
-          const response = await fetchPlans();
-          if (active) {
-            setData({
-              currentPlanId: policy.planId ?? policy.plan_id,
-              plans: response.plans ?? [],
-            });
+
+          // The catalog is only needed for the comparison tool's second section.
+          let plans = [];
+          if (toolId === "plan-comparison") {
+            const catalog = await fetchPlans();
+            plans = catalog.plans ?? [];
           }
+
+          if (active) setData({ policy, plan, plans });
         }
         // clinical-history-review reads the member document directly.
       } catch (cause) {

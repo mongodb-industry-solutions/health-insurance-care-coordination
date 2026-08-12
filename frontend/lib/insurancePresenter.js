@@ -191,6 +191,108 @@ export function toAuthorizationHistory(traces = []) {
 }
 
 /**
+ * Columns and attribute rows for the plan-comparison table.
+ *
+ * The data model only guarantees the tiers embedded on the member's own plan, so
+ * the honest comparison is Standard vs Specialty rather than sibling plans. The
+ * table takes an array of columns, so a future cross-plan endpoint extends this
+ * horizontally without a rewrite.
+ */
+export function toTierComparison(plan, activeTier) {
+  const tiers = pick(plan?.coverage, "tiers") ?? {};
+
+  const columns = Object.entries(tiers).map(([name, tier]) => ({
+    id: name,
+    label: titleCase(name),
+    isCurrent: name.toLowerCase() === String(activeTier).toLowerCase(),
+    tier,
+  }));
+
+  const rows = [
+    {
+      id: "covered",
+      label: "Covered",
+      value: (tier) => (tier.covered ? "✓" : "—"),
+    },
+    {
+      id: "prior-auth",
+      label: "Prior auth required",
+      value: (tier) =>
+        pick(tier, "prior_auth_required", "priorAuthRequired") ? "Yes" : "No",
+    },
+    {
+      id: "cost-share",
+      label: "Cost share",
+      value: (tier) =>
+        tier.coinsurance != null
+          ? `${Math.round(tier.coinsurance * 100)}% coinsurance`
+          : tier.copay != null
+            ? `${formatAmount(tier.copay)} copay`
+            : "—",
+    },
+    {
+      id: "deductible",
+      label: "Deductible",
+      value: (tier) =>
+        tier.deductible != null ? formatAmount(tier.deductible) : "—",
+    },
+    {
+      id: "oop-max",
+      label: "Out-of-pocket max",
+      value: (tier) => {
+        const max = pick(tier, "out_of_pocket_max", "outOfPocketMax");
+        return max != null ? formatAmount(max) : "—";
+      },
+    },
+  ];
+
+  return { columns, rows };
+}
+
+/**
+ * How every plan in the catalog treats one tier — the secondary section of the
+ * comparison tool.
+ *
+ * Framed as the catalog rather than "plans available to you" on purpose: nothing
+ * in the data models enrollment eligibility, and premiums live on the Policy, not
+ * the Plan, so switching cost is genuinely unknown here.
+ */
+export function toCrossPlanCoverage(plans = [], currentPlanId, tierName) {
+  const tier = String(tierName ?? "specialty").toLowerCase();
+
+  return plans.map((plan) => {
+    const planId = pick(plan, "plan_id", "planId");
+    const tiers = pick(plan?.coverage, "tiers") ?? {};
+    const tierKey = Object.keys(tiers).find(
+      (name) => name.toLowerCase() === tier
+    );
+    const tierData = tierKey ? tiers[tierKey] : null;
+
+    const costShare = !tierData?.covered
+      ? null
+      : tierData.coinsurance != null
+        ? `${Math.round(tierData.coinsurance * 100)}% coinsurance`
+        : tierData.copay != null
+          ? `${formatAmount(tierData.copay)} copay`
+          : null;
+
+    const excluded = pick(plan?.coverage, "excluded_services", "excludedServices") ?? [];
+
+    return {
+      id: planId,
+      name: pick(plan, "plan_name", "planName") ?? planId,
+      planType: pick(plan, "plan_type", "planType"),
+      network: plan?.network?.replaceAll("_", " "),
+      isCurrent: planId === currentPlanId,
+      covered: Boolean(tierData?.covered),
+      costShare,
+      // Named exclusions explain *why* a tier isn't covered.
+      exclusions: excluded.filter((service) => service.includes(tier)),
+    };
+  });
+}
+
+/**
  * Coverage tier cards. `plan.coverage.tiers` is an object keyed by tier name,
  * and the member's own `eligibility.tier` decides which card is highlighted.
  */

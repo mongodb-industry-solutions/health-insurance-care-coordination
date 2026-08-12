@@ -36,6 +36,12 @@ export const TOOLS = [
     icon: "ClockWithArrow",
   },
   {
+    id: "decision-tracing",
+    label: "Decision Tracing",
+    category: "insurance",
+    icon: "Diagram3", // branching flow; stands in for a reasoning chain
+  },
+  {
     id: "clinical-history-review",
     label: "Clinical History Review",
     category: "health",
