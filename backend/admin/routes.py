@@ -1,8 +1,12 @@
 """Admin / demo routes: seed and reset synthetic data.
 
-Namespaced under /api/admin to mark it as privileged tooling, distinct from the
-product domains. These endpoints write and delete data (including audit rows) and
-should be locked down or removed for production.
+Served at the root (`/seed`, `/reset-demo`, `/members/{id}/reset-demo`) rather than
+under the `/api` prefix the product domains use — short to type during a demo, and
+the absence of the prefix is itself a marker that these are not product endpoints.
+
+They write and delete data, including the audit rows this is the only code allowed
+to remove, and `/reset-demo` discards every member's state. Lock them down or drop
+the router entirely for anything but a demo.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -57,7 +61,7 @@ async def reset_member(
     `summary.last_authorization_status` back to `none`.
 
     Other members are untouched, as are the shared plans, guidelines and precedent
-    claims. Use `POST /api/admin/reset-demo` when the shared catalog needs rebuilding too.
+    claims. Use `POST /reset-demo` when the shared catalog needs rebuilding too.
 
     404 when the id has no canonical profile — including a member that exists in the
     database but was not seeded from one, since there is no baseline to restore.
