@@ -6,25 +6,48 @@ import DetailPanel from "@/components/detailPanel/DetailPanel";
 import OtherTools from "@/components/otherTools/OtherTools";
 import PatientIdentityCard from "@/components/patientIdentityCard/PatientIdentityCard";
 import PendingActionsZone from "@/components/pendingActionsZone/PendingActionsZone";
+import ProcessDock from "@/components/processOverlay/ProcessDock";
+import ProcessOverlay from "@/components/processOverlay/ProcessOverlay";
 import ToolDrawer from "@/components/toolDrawer/ToolDrawer";
-import { toPendingActions } from "@/lib/memberPresenter";
+import { toPatientLine, toPendingActions } from "@/lib/memberPresenter";
 import { useMemberDashboard } from "./useMemberDashboard";
 import styles from "./MemberDashboard.module.css";
 
 /**
- * Main tab: patient context on the left, actions and tools on the right.
+ * Main tab: patient context on the left, actions and tools on the right. The
+ * process opens over the top of it, and minimises to a docked tab.
+ *
+ * The run state sits in `useMemberDashboard`, which stays mounted through all
+ * three process states — that is what lets the docked tab keep reporting live
+ * progress after the overlay is dismissed.
  *
  * @param {object} props.profile  The selected MEMBERS entry (avatar, names).
  * @param {() => void} props.onLogOut
  */
 export default function MemberDashboard({ profile, onLogOut }) {
-  const { member, loading, error, startingActionId, startProcess } =
+  const { member, loading, error, runningActionId, startProcess, run } =
     useMemberDashboard(profile.memberId);
 
   const [openTool, setOpenTool] = useState(null);
+  // "hidden" | "open" | "docked" — the process is never modal to the run itself.
+  const [processState, setProcessState] = useState("hidden");
+  // Held rather than looked up: the action is resolved by the time the run ends.
+  const [processAction, setProcessAction] = useState(null);
 
   // TODO: point at the real settings route once it exists.
   const handleOpenSettings = () => console.log("Open settings");
+
+  const handleStartProcess = (actionId) => {
+    const action = toPendingActions(member).find(
+      (entry) => entry.id === actionId
+    );
+
+    setProcessAction(action ?? { id: actionId, label: "Prior Authorization" });
+    setProcessState("open");
+    startProcess(actionId);
+  };
+
+  const processTitle = processAction?.label ?? "Prior Authorization";
 
   return (
     <>
@@ -49,8 +72,8 @@ export default function MemberDashboard({ profile, onLogOut }) {
           <div>
             <PendingActionsZone
               actions={toPendingActions(member)}
-              startingActionId={startingActionId}
-              onStartProcess={startProcess}
+              runningActionId={runningActionId}
+              onStartProcess={handleStartProcess}
             />
             <OtherTools onOpenTool={setOpenTool} />
           </div>
@@ -62,6 +85,25 @@ export default function MemberDashboard({ profile, onLogOut }) {
         member={member}
         onClose={() => setOpenTool(null)}
       />
+
+      {processState === "open" && (
+        <ProcessOverlay
+          run={run}
+          title={processTitle}
+          patientLine={toPatientLine(member, profile)}
+          onDock={() => setProcessState("docked")}
+          onDismiss={() => setProcessState("hidden")}
+        />
+      )}
+
+      {processState === "docked" && (
+        <ProcessDock
+          run={run}
+          title={processTitle}
+          onOpen={() => setProcessState("open")}
+          onDismiss={() => setProcessState("hidden")}
+        />
+      )}
     </>
   );
 }

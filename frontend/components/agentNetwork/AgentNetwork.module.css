@@ -1,0 +1,210 @@
+.card {
+  padding: 16px 18px 20px;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background:
+    radial-gradient(
+      120% 90% at 50% 0%,
+      rgba(0, 104, 74, 0.035) 0%,
+      transparent 70%
+    ),
+    #ffffff;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.heading {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: #9aa39e;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  color: #9aa39e;
+}
+
+.state::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #ccd6d0;
+}
+
+.stateLive {
+  color: var(--color-green);
+}
+
+.stateLive::before {
+  background-color: var(--color-green);
+  animation: blink 1.5s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+
+/* Both layers share the viewBox's aspect ratio, so their coordinates agree. */
+.stage {
+  position: relative;
+  margin: 30px 2px 34px;
+}
+
+.wires {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.wireBase {
+  fill: none;
+  stroke: #e2e7e4;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+/* Marching dashes along the curve itself — the flow follows the geometry. */
+.wireFlow {
+  fill: none;
+  stroke: url(#agent-net-flow);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-dasharray: 1.5 6;
+  animation: march 0.9s linear infinite;
+}
+
+@keyframes march {
+  to {
+    stroke-dashoffset: -7.5;
+  }
+}
+
+.packet {
+  fill: var(--color-green);
+  filter: drop-shadow(0 0 3px rgba(0, 104, 74, 0.45));
+}
+
+/* Nodes ---------------------------------------------------------------- */
+
+.node {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  transform: translate(-50%, -50%);
+}
+
+.tile {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  background: linear-gradient(
+    155deg,
+    var(--color-green-soft) 0%,
+    var(--color-green-dark) 100%
+  );
+  color: #ffffff;
+  box-shadow:
+    0 1px 2px rgba(0, 69, 58, 0.28),
+    0 6px 14px rgba(0, 69, 58, 0.12);
+  transition: box-shadow 300ms ease, transform 300ms ease;
+}
+
+.tileActive {
+  transform: scale(1.06);
+  box-shadow:
+    0 1px 2px rgba(0, 69, 58, 0.3),
+    0 6px 16px rgba(0, 69, 58, 0.18),
+    0 0 0 4px rgba(0, 104, 74, 0.14);
+  animation: halo 2.1s ease-out infinite;
+}
+
+@keyframes halo {
+  0% {
+    box-shadow:
+      0 1px 2px rgba(0, 69, 58, 0.3),
+      0 6px 16px rgba(0, 69, 58, 0.18),
+      0 0 0 0 rgba(0, 104, 74, 0.3);
+  }
+  70% {
+    box-shadow:
+      0 1px 2px rgba(0, 69, 58, 0.3),
+      0 6px 16px rgba(0, 69, 58, 0.18),
+      0 0 0 12px rgba(0, 104, 74, 0);
+  }
+  100% {
+    box-shadow:
+      0 1px 2px rgba(0, 69, 58, 0.3),
+      0 6px 16px rgba(0, 69, 58, 0.18),
+      0 0 0 0 rgba(0, 104, 74, 0);
+  }
+}
+
+/* The member is a participant, not a service — held back visually. */
+.tileMuted {
+  background: linear-gradient(155deg, #8b968f 0%, #5f6b64 100%);
+  box-shadow: 0 1px 2px rgba(26, 26, 26, 0.18);
+}
+
+.meta {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 96px;
+  transform: translateX(-50%);
+  text-align: center;
+}
+
+.metaAbove {
+  top: auto;
+  bottom: calc(100% + 7px);
+}
+
+.label {
+  font-family: var(--font-serif);
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--color-charcoal);
+}
+
+.caption {
+  font-family: var(--font-sans);
+  font-size: 9.5px;
+  line-height: 1.25;
+  color: #9aa39e;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wireFlow,
+  .tileActive,
+  .stateLive::before {
+    animation: none;
+  }
+}

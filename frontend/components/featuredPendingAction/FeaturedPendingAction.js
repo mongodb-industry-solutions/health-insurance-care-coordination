@@ -12,7 +12,6 @@ import styles from "./FeaturedPendingAction.module.css";
  * @param {string} props.context  One line on why the action exists.
  * @param {"high"|"normal"} props.urgency
  * @param {boolean} props.inProgress  Already started — no CTA.
- * @param {boolean} props.isLoading
  * @param {() => void} props.onStartProcess
  */
 export default function FeaturedPendingAction({
@@ -20,7 +19,6 @@ export default function FeaturedPendingAction({
   context,
   urgency = "normal",
   inProgress = false,
-  isLoading = false,
   onStartProcess,
 }) {
   return (
@@ -39,7 +37,7 @@ export default function FeaturedPendingAction({
 
       {inProgress ? (
         <p className={styles.inProgress}>
-          This case is open and awaiting a medical director.
+          This case is open — the agents are working on it.
         </p>
       ) : (
         <div className={styles.cta}>
@@ -47,7 +45,6 @@ export default function FeaturedPendingAction({
             className={styles.ctaButton}
             variant="primary"
             size="large"
-            isLoading={isLoading}
             rightGlyph={<Icon glyph="ArrowRight" />}
             onClick={onStartProcess}
           >

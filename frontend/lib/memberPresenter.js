@@ -68,6 +68,28 @@ export function toIdentityRows(member) {
 }
 
 /**
+ * One line of patient context: name, coverage tier, managing provider.
+ *
+ * For the process overlay, which blurs the dashboard out behind it — the full
+ * identity card would be a duplicate, but losing the name entirely would leave
+ * the reader unsure whose case they are watching.
+ */
+export function toPatientLine(member, profile) {
+  const name = member
+    ? `${member.firstName} ${member.lastName}`
+    : profile?.name;
+  const provider = pick(carePlanOf(member), "managing_provider", "managingProvider");
+
+  return [
+    name,
+    titleCase(member?.eligibility?.tier),
+    provider?.name,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/**
  * Reverse-chronological timeline built from the member's clinical history. The
  * current entry comes from the open pending action or the therapy under
  * consideration, so it reflects what the member is actually waiting on.

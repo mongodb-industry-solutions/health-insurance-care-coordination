@@ -20,12 +20,13 @@ function byPriority(a, b) {
  * one featured action plus any others as compact rows.
  *
  * @param {Array} props.actions  From toPendingActions().
- * @param {string|null} props.startingActionId
+ * @param {string|null} props.runningActionId  Live run, ahead of the reload that
+ *   will move the action's own status to `in_progress`.
  * @param {(actionId: string) => void} props.onStartProcess
  */
 export default function PendingActionsZone({
   actions = [],
-  startingActionId,
+  runningActionId,
   onStartProcess,
 }) {
   const sorted = [...actions].sort(byPriority);
@@ -44,8 +45,10 @@ export default function PendingActionsZone({
               title={featured.label}
               context={featured.context}
               urgency={featured.urgency}
-              inProgress={featured.status === "in_progress"}
-              isLoading={startingActionId === featured.id}
+              inProgress={
+                featured.status === "in_progress" ||
+                runningActionId === featured.id
+              }
               onStartProcess={() => onStartProcess?.(featured.id)}
             />
 
@@ -56,8 +59,10 @@ export default function PendingActionsZone({
                     key={action.id}
                     title={action.label}
                     urgency={action.urgency}
-                    inProgress={action.status === "in_progress"}
-                    isLoading={startingActionId === action.id}
+                    inProgress={
+                      action.status === "in_progress" ||
+                      runningActionId === action.id
+                    }
                     onStartProcess={() => onStartProcess?.(action.id)}
                   />
                 ))}

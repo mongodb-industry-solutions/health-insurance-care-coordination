@@ -10,14 +10,12 @@ import styles from "./CompactPendingActionRow.module.css";
  * @param {string} props.title
  * @param {"high"|"normal"} props.urgency
  * @param {boolean} props.inProgress
- * @param {boolean} props.isLoading
  * @param {() => void} props.onStartProcess
  */
 export default function CompactPendingActionRow({
   title,
   urgency = "normal",
   inProgress = false,
-  isLoading = false,
   onStartProcess,
 }) {
   return (
@@ -32,12 +30,7 @@ export default function CompactPendingActionRow({
       {inProgress ? (
         <span className={styles.inProgress}>In progress</span>
       ) : (
-        <Button
-          variant="default"
-          size="small"
-          isLoading={isLoading}
-          onClick={onStartProcess}
-        >
+        <Button variant="default" size="small" onClick={onStartProcess}>
           Start Process
         </Button>
       )}

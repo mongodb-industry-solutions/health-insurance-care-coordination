@@ -14,9 +14,9 @@ export function fetchClinicalContext(memberId) {
  * POST /api/members/{memberId}/pending-action — advance an action's lifecycle.
  * The backend takes `action_id` and `status` as query params, not a body.
  *
- * This is the entry point into the agent workflow. It only moves the action to
- * `in_progress`; kicking off the agent run itself is a separate concern that
- * does not have a frontend-facing endpoint yet.
+ * Not the way into the agent workflow — `streamAuthorizationRun` in
+ * `lib/api/authorization.js` is, and it moves the action itself. This is only
+ * for adjusting an action's status directly.
  */
 export function startPendingAction(memberId, actionId) {
   const params = new URLSearchParams({

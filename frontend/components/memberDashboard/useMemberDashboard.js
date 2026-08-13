@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { fetchMember, startPendingAction } from "@/lib/api/members";
+import { fetchMember } from "@/lib/api/members";
+import { useAuthorizationRun } from "@/components/authorizationRun/useAuthorizationRun";
 
 /**
  * Loads the member document for the dashboard and drives the "Start Process"
@@ -12,7 +13,8 @@ export function useMemberDashboard(memberId) {
   const [member, setMember] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [startingActionId, setStartingActionId] = useState(null);
+  const [runningActionId, setRunningActionId] = useState(null);
+  const run = useAuthorizationRun();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -31,24 +33,41 @@ export function useMemberDashboard(memberId) {
     load();
   }, [load]);
 
+  /**
+   * Opens the streaming run. The backend moves the pending action to
+   * `in_progress` itself, so there is no separate lifecycle call to make first —
+   * doing one would only trip the 409 that guards against concurrent runs.
+   *
+   * `run.start` resolves when the stream reaches `stopped` or `error`, which is
+   * when the member document is worth re-reading.
+   *
+   * `runningActionId` marks the action as in progress for the whole run — it is
+   * deliberately not a button spinner. A run takes 60-120 seconds, and a button
+   * held in a loading state that long reads as broken; the overlay and the
+   * docked tab are where progress belongs.
+   */
   const startProcess = useCallback(
     async (actionId) => {
-      setStartingActionId(actionId);
+      setRunningActionId(actionId);
 
       try {
-        await startPendingAction(memberId, actionId);
-        // TODO: this only marks the action in_progress. Kicking off the agent
-        // run itself has no frontend-facing endpoint yet — confirm with the
-        // backend team how the workflow should be triggered from here.
+        await run.start(memberId);
         await load();
-      } catch (cause) {
-        setError(cause);
       } finally {
-        setStartingActionId(null);
+        setRunningActionId(null);
       }
     },
-    [load, memberId]
+    // `run.start` is stable; the rest of `run` changes on every event.
+    [load, memberId, run.start] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  return { member, loading, error, startingActionId, startProcess, reload: load };
+  return {
+    member,
+    loading,
+    error,
+    runningActionId,
+    startProcess,
+    run,
+    reload: load,
+  };
 }
