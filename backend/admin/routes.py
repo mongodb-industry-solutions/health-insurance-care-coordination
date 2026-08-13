@@ -1,6 +1,6 @@
 """Admin / demo routes: seed and reset synthetic data.
 
-Served at the root (`/seed`, `/reset-demo`, `/members/{id}/reset-demo`) rather than
+Served at the root (`/seed`, `/reset-demo`, `/members/{member_id}/reset-demo`) rather than
 under the `/api` prefix the product domains use — short to type during a demo, and
 the absence of the prefix is itself a marker that these are not product endpoints.
 
