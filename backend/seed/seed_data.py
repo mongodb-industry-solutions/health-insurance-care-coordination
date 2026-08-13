@@ -28,6 +28,7 @@ from claims import ClaimRepository
 from guidelines import GuidelineRepository
 from plans import PlanRepository
 from audit.repository import AuditRepository
+from notifications.repository import NotificationRepository
 from seed.generators import ALL_PROFILES, GUIDELINES, PLANS, PRECEDENT_CLAIMS, build_bundle
 
 
@@ -40,9 +41,14 @@ def seed(reset: bool = False):
     guidelines = GuidelineRepository(connector)
     plans = PlanRepository(connector)
     audit = AuditRepository(connector)
+    notifications = NotificationRepository(connector)
 
     if reset:
-        for repo in (members, policies, claims, guidelines, plans, audit):
+        # Same set as POST /api/admin/reset-demo, so the two paths mean the same thing.
+        # Notifications are written at runtime (every closure notifies the member) and
+        # are not keyed to a trace, so leaving them behind makes a re-run of the same
+        # member show a notification from the previous run.
+        for repo in (members, policies, claims, guidelines, plans, audit, notifications):
             deleted = repo.delete_all()
             print(f"  reset {repo.collection_name}: removed {deleted} docs")
 
