@@ -31,6 +31,18 @@ _EXPLANATORY_NOTE_TYPES = ("medication_hold", "refill_gap", "gap_review")
 _TRIAL_CLEAN_CONFIDENCE = 0.95
 _TRIAL_UNEXPLAINED_CONFIDENCE = 0.60
 
+# A `partial` documented response is a different kind of doubt from a refill gap:
+# the trial ran exactly as recorded, but the clinician judged the drug to have
+# partly worked. Step therapy still passes on duration, so nothing downstream fails
+# — which is why the uncertainty has to be priced here or it disappears entirely.
+# 0.85 sits below every guideline threshold in use (0.90 RA/PSA, 0.92 IBD), so a
+# partial responder always reaches a human. That is the intent: "the drug sort of
+# worked, escalate anyway" is a judgement call, not a criteria failure.
+_TRIAL_PARTIAL_RESPONSE_CONFIDENCE = 0.85
+
+# Documented outcomes that mean the first-line drug partly worked.
+_PARTIAL_RESPONSE_OUTCOMES = ("partial",)
+
 # Semantic-match confidence. A requested therapy that a guideline classifies for
 # a diagnosis already coded on the member record is a near-certain match; the
 # residual doubt is vocabulary drift, not clinical doubt. A miss is scored low
@@ -200,6 +212,8 @@ class MemberService:
                 "member_id": member_id,
                 "drug": drug,
                 "documented_months": 0.0,
+                "response_quality": None,
+                "partial_response": False,
                 "fill_count": 0,
                 "first_fill": None,
                 "last_fill": None,
@@ -237,6 +251,15 @@ class MemberService:
         documented_months = max(
             [float(r.get("duration_months") or 0) for r in clinician_documented] or [0.0]
         )
+
+        # How well the drug worked, per the clinician — a separate axis from how long
+        # it ran. The most recent assessment stands.
+        response_quality = (
+            (clinician_documented[-1].get("outcome") or "").strip().lower()
+            if clinician_documented
+            else None
+        )
+        partial_response = response_quality in _PARTIAL_RESPONSE_OUTCOMES
 
         fills = self._fill_dates(member_id, drug)
         threshold = cadence_days * gap_factor
@@ -328,10 +351,27 @@ class MemberService:
                 "Reduce confidence and lean toward human review."
             )
 
+        # Applied after the branch chain, and only downwards: a partial response is a
+        # reason to escalate, never a reason to look more certain than an unexplained
+        # gap already made the case.
+        if partial_response and confidence > _TRIAL_PARTIAL_RESPONSE_CONFIDENCE:
+            confidence = _TRIAL_PARTIAL_RESPONSE_CONFIDENCE
+            detail += (
+                f" The documented response is '{response_quality}', not inadequate: "
+                f"{drug} partly worked, so escalating to the requested therapy is a "
+                "clinical judgement rather than a criteria call. Confidence reduced to "
+                f"{confidence} — below every guideline threshold, so this reaches a "
+                "human reviewer even though step therapy passes on duration."
+            )
+
         return {
             "member_id": member_id,
             "drug": drug,
             "documented_months": documented_months,
+            # The clinician's assessment of how well the drug worked, surfaced so the
+            # agent can state it in its reasoning step rather than inferring it.
+            "response_quality": response_quality,
+            "partial_response": partial_response,
             "fill_count": len(fills),
             "first_fill": fills[0].isoformat() if fills else None,
             "last_fill": fills[-1].isoformat() if fills else None,

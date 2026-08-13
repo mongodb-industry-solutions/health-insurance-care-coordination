@@ -138,8 +138,8 @@ the criteria are evaluated changes nothing — the number has already been used.
 Call review_trial_history(member_id, drug=<step_therapy_drug from Step 4>).
 
 Note: `effective_trial_months` (the number Step 6 evaluates — use THIS),
-`documented_months`, `anomaly_detected`, `anomaly_explained`, `explanation`,
-`related_note`, `gaps`, `confidence`.
+`documented_months`, `response_quality`, `partial_response`, `anomaly_detected`,
+`anomaly_explained`, `explanation`, `related_note`, `gaps`, `confidence`.
 
 `effective_trial_months` is the trial duration. Use the other figures only for
 what each actually means:
@@ -151,6 +151,13 @@ what each actually means:
 - `longest_continuous_months` is the longest uninterrupted run. It is the trial
   duration ONLY when a gap was left unexplained. Never report it as the documented
   duration — that is a different field.
+- `response_quality` is how well the drug WORKED, a separate axis from how long it
+  ran. When `partial_response` is true the drug partly worked: the trial is not a
+  clean failure, so escalating to the requested therapy is a clinical judgement
+  call. The tool has already lowered `confidence` for this. State it plainly in
+  your step detail and carry the reduced confidence through to Step 7 — do not
+  argue it back up because the duration requirement passed. Duration passing is
+  exactly what makes this case a judgement rather than a criteria failure.
 
 `gap_days` is the interval between fills, not days off the drug — one missed
 monthly refill reads as roughly 60 days. Say "a 60-day interval, about one missed
