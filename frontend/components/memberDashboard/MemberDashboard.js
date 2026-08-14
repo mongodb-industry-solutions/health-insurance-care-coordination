@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import AppHeader from "@/components/appHeader/AppHeader";
+import Chatbot from "@/components/chatbot/Chatbot";
 import DetailPanel from "@/components/detailPanel/DetailPanel";
 import OtherTools from "@/components/otherTools/OtherTools";
 import PatientIdentityCard from "@/components/patientIdentityCard/PatientIdentityCard";
@@ -104,6 +105,13 @@ export default function MemberDashboard({ profile, onLogOut }) {
           onDismiss={() => setProcessState("hidden")}
         />
       )}
+
+      {/* Mounted here rather than in the layout so the agents get the member as
+          opening context — the questions it exists to answer are all about them. */}
+      <Chatbot
+        memberId={profile.memberId}
+        memberName={[profile.firstName, profile.lastName].filter(Boolean).join(" ")}
+      />
     </>
   );
 }

@@ -16,6 +16,7 @@ from plans.routes import router as plans_router
 from notifications.routes import router as notifications_router
 from admin.routes import router as admin_router
 from authorization.routes import router as authorization_router
+from chat.routes import router as chat_router
 
 load_dotenv()
 
@@ -69,3 +70,5 @@ app.include_router(notifications_router)
 app.include_router(admin_router)
 # Frontend-facing workflow entry points (Start Process, progress, human closure).
 app.include_router(authorization_router)
+# Free-form chat with the same agents, independent of the authorization workflow.
+app.include_router(chat_router)
