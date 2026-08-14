@@ -1,0 +1,33 @@
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  color: var(--color-charcoal);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: var(--color-green);
+}
+
+.dotHigh {
+  background-color: #c9791a;
+}
+
+.inProgress {
+  font-family: var(--font-serif);
+  font-size: 13.5px;
+  color: var(--color-muted);
+}

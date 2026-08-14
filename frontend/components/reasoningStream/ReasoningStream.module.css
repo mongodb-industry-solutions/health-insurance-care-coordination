@@ -1,0 +1,366 @@
+.stream {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  /* Fills whatever height the panel gives it, and no more. */
+  flex: 1;
+  min-height: 260px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background-color: #ffffff;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex: none;
+  padding: 14px 18px 13px;
+  border-bottom: 1px solid var(--color-border);
+  background-color: #fcfdfc;
+}
+
+.headText {
+  min-width: 0;
+}
+
+.heading {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: #9aa39e;
+}
+
+/* The live status line — the one piece of copy that keeps moving. */
+.now {
+  margin: 5px 0 0;
+  font-family: var(--font-serif);
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--color-charcoal);
+}
+
+.count {
+  flex: none;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  color: #9aa39e;
+  font-variant-numeric: tabular-nums;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 18px 20px;
+  scrollbar-width: thin;
+}
+
+.body:focus-visible {
+  outline: 2px solid var(--color-green);
+  outline-offset: -2px;
+}
+
+.empty {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+/* Stage divider ---------------------------------------------------------- */
+
+.stageMark {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 22px 0 14px;
+  animation: arrive 320ms ease both;
+}
+
+.stageMark:first-child {
+  margin-top: 0;
+}
+
+.stageNumber {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background-color: var(--color-green);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.stageTitle {
+  font-family: var(--font-serif);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--color-charcoal);
+}
+
+.stageAgent {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background-color: var(--color-green-tint);
+  font-family: var(--font-sans);
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-green-dark);
+}
+
+.stageRule {
+  flex: 1;
+  height: 1px;
+  background-color: var(--color-border);
+}
+
+.time {
+  flex: none;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 10px;
+  color: #b6beb9;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Reasoning step --------------------------------------------------------- */
+
+.entry {
+  padding: 10px 0 12px 13px;
+  border-left: 2px solid #e4e9e6;
+  animation: arrive 320ms ease both;
+}
+
+.entry:hover {
+  border-left-color: var(--color-green);
+}
+
+@keyframes arrive {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.entryHead {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 5px;
+}
+
+.name {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-green-dark);
+}
+
+.memory {
+  font-family: var(--font-sans);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #a8b0ab;
+}
+
+.confidence {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background-color: #f0f2f1;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 10px;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.entryHead .time {
+  margin-left: auto;
+}
+
+/* The reasoning text is the substance — full paragraph, no truncation. */
+.detail {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: #2b2e2c;
+}
+
+/* Milestones ------------------------------------------------------------- */
+
+.milestone {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background-color: #f6f7f6;
+  animation: arrive 320ms ease both;
+}
+
+.milestoneIcon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: #ffffff;
+  color: var(--color-muted);
+}
+
+.milestoneText {
+  flex: 1;
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #3c4340;
+}
+
+.accent {
+  background-color: var(--color-green-tint);
+}
+
+.accent .milestoneIcon {
+  background-color: var(--color-green);
+  color: #ffffff;
+}
+
+.accent .milestoneText {
+  color: var(--color-green-dark);
+}
+
+.warn {
+  background-color: #fdf3d8;
+}
+
+.warn .milestoneIcon {
+  background-color: #b8860b;
+  color: #ffffff;
+}
+
+.warn .milestoneText {
+  color: #6b4e00;
+}
+
+.error {
+  background-color: #fdecea;
+}
+
+.error .milestoneIcon {
+  background-color: #b1371f;
+  color: #ffffff;
+}
+
+.error .milestoneText {
+  color: #7a2618;
+}
+
+.terminal {
+  margin-top: 16px;
+  border: 1px solid rgba(0, 104, 74, 0.2);
+}
+
+.error.terminal {
+  border-color: rgba(177, 55, 31, 0.3);
+}
+
+/* Live tail -------------------------------------------------------------- */
+
+.working {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 14px 0 0;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  color: var(--color-muted);
+}
+
+.workingDots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.workingDots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background-color: var(--color-green);
+  animation: bounce 1.2s ease-in-out infinite;
+}
+
+.workingDots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.workingDots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes bounce {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+.jump {
+  position: absolute;
+  right: 18px;
+  bottom: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background-color: #ffffff;
+  box-shadow: 0 4px 14px rgba(10, 20, 15, 0.12);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--color-green);
+  cursor: pointer;
+  animation: arrive 200ms ease both;
+}
+
+.jump:hover {
+  border-color: var(--color-green);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stageMark,
+  .entry,
+  .milestone,
+  .jump {
+    animation: none;
+  }
+
+  .workingDots span {
+    animation: none;
+    opacity: 0.6;
+  }
+}

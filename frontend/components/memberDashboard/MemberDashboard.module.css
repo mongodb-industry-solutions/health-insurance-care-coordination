@@ -1,0 +1,30 @@
+.layout {
+  display: grid;
+  grid-template-columns: 40fr 60fr;
+  gap: 36px;
+  padding: 36px var(--app-padding-x) 60px;
+}
+
+.notice {
+  margin: 0 var(--app-padding-x);
+  padding: 14px 18px;
+  border-radius: 12px;
+  background-color: #fef7e3;
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  color: #4c3a00;
+}
+
+.status {
+  padding: 40px var(--app-padding-x);
+  font-family: var(--font-serif);
+  font-size: 16px;
+  color: var(--color-muted);
+}
+
+@media (max-width: 960px) {
+  .layout {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+}

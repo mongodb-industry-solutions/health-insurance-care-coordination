@@ -1,0 +1,29 @@
+/* Deliberately minimal: no filters, no urgency chrome, no actions. There is no
+   care-gap object in the data model, so there is nothing to act on. */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 48px 0 40px;
+  text-align: center;
+}
+
+.icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background-color: var(--color-green-tint);
+  color: var(--color-green);
+}
+
+.message {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 15.5px;
+  color: var(--color-muted);
+}

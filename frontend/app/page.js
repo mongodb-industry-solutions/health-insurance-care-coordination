@@ -1,14 +1,38 @@
 "use client";
 
-// import InfoWizard from "@/components/infoWizard/InfoWizard";
+import { useState } from "react";
+import Header from "@/components/header/Header";
+import MemberDashboard from "@/components/memberDashboard/MemberDashboard";
+import MemberSelection from "@/components/memberSelection/MemberSelection";
+import StoryCarousel from "@/components/storyCarousel/StoryCarousel";
 
 export default function Home() {
+  // The picked member, and whether their story is still showing over the page.
+  const [member, setMember] = useState(null);
+  const [storyOpen, setStoryOpen] = useState(false);
+
+  const handleStart = (picked) => {
+    setMember(picked);
+    setStoryOpen(true);
+  };
+
+  const handleLogOut = () => {
+    setMember(null);
+    setStoryOpen(false);
+  };
+
+  if (member && !storyOpen) {
+    return <MemberDashboard profile={member} onLogOut={handleLogOut} />;
+  }
+
   return (
-    <main className="flex flex-col min-h-screen items-center justify-center relative">
-      <div className="absolute top-8 left-1/2 -translate-x-1/2">
-        {/* <InfoWizard /> */}
-        <h1>Your components will go here</h1>
-      </div>
+    <main>
+      <Header />
+      <MemberSelection onStart={handleStart} />
+
+      {member && storyOpen && (
+        <StoryCarousel member={member} onFinish={() => setStoryOpen(false)} />
+      )}
     </main>
   );
 }

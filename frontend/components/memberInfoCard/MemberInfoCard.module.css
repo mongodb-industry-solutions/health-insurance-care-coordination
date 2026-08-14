@@ -1,0 +1,51 @@
+.card {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  z-index: 40;
+  width: 340px;
+  max-width: calc(100vw - 2 * var(--page-padding-x));
+  padding: 30px;
+  border-radius: 22px;
+  background-color: #ededed;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  text-align: center;
+}
+
+/* Collision handling: anchor to the card's right edge near the viewport edge. */
+.flipped {
+  left: auto;
+  right: 0;
+}
+
+.title {
+  margin: 0 0 18px;
+  font-family: var(--font-serif);
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--color-green);
+}
+
+.body {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--color-charcoal);
+}
+
+.body + .body {
+  margin-top: 18px;
+}
+
+/* Colors come from the LeafyGreen Badge variant; only spacing is ours. */
+.badge {
+  margin-top: 22px;
+}
+
+@media (max-width: 640px) {
+  .card {
+    width: 280px;
+    padding: 22px;
+  }
+}

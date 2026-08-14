@@ -1,0 +1,102 @@
+.timeline {
+  position: relative;
+  margin: 0;
+  padding: 4px 0 0 26px;
+  list-style: none;
+}
+
+/* The connecting line runs behind the dots. */
+.timeline::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 5px;
+  width: 1px;
+  background-color: var(--color-border);
+}
+
+.event {
+  position: relative;
+  padding-bottom: 22px;
+}
+
+.event:last-child {
+  padding-bottom: 0;
+}
+
+.dot {
+  position: absolute;
+  top: 4px;
+  left: -26px;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--color-green);
+  border-radius: 50%;
+  background-color: #ffffff;
+}
+
+.dotCurrent {
+  background-color: var(--color-green);
+}
+
+.currentLabel {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-charcoal);
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-family: var(--font-serif);
+  font-size: 14px;
+  color: var(--color-muted);
+}
+
+.actor {
+  font-weight: 700;
+  color: var(--color-charcoal);
+}
+
+.description {
+  margin: 3px 0 0;
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: #333333;
+}
+
+.activeTreatment {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 22px;
+  padding: 14px 20px;
+  border-radius: 14px;
+  background-color: #e3f5ea;
+}
+
+.activeTreatmentLabel {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-green);
+}
+
+.activeTreatmentValue {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  color: var(--color-charcoal);
+}
+
+.empty {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  color: var(--color-muted);
+}

@@ -1,2 +1,43 @@
 @import "tailwindcss";
 
+/*
+ * Design tokens only. Component-specific styling lives in the CSS module next
+ * to each component (e.g. components/userCard/UserCard.module.css).
+ */
+:root {
+  /* Typography: editorial serif for content, plain sans for nav/UI chrome */
+  --font-serif: var(--font-pt-serif), Georgia, "Times New Roman", serif;
+  --font-sans: var(--font-inter), Helvetica, Arial, sans-serif;
+
+  /* Brand + neutrals */
+  --color-green: #00684a;
+  --color-green-dark: #00453a;
+  --color-green-soft: #1a7a5e;
+  --color-charcoal: #1a1a1a;
+  --color-muted: #666666;
+  --color-border: #e0e0e0;
+  --color-fill: #f0f0f0;
+  --color-green-tint: #e3fcf7; /* LeafyGreen green.light3 */
+
+  /* Layout */
+  --page-max-width: 1280px;
+  --page-padding-x: 64px;
+  --app-padding-x: 44px; /* main dashboard shell */
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #ffffff;
+  color: var(--color-charcoal);
+  font-family: var(--font-serif);
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (max-width: 640px) {
+  :root {
+    --page-padding-x: 24px;
+    --app-padding-x: 20px;
+  }
+}

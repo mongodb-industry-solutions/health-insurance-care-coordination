@@ -1,0 +1,149 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background-color: rgba(0, 0, 0, 0.25);
+  animation: fadeIn 300ms ease-out both;
+}
+
+.backdropLeaving {
+  animation: fadeOut 250ms ease-in both;
+}
+
+.panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 91;
+  display: flex;
+  flex-direction: column;
+  width: 42vw;
+  min-width: 380px;
+  background-color: #ffffff;
+  animation: slideIn 300ms ease-out both;
+}
+
+.panelLeaving {
+  animation: slideOut 250ms ease-in both;
+}
+
+/* Pinned while the body scrolls. */
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 34px 36px 18px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.headingIcon {
+  display: flex;
+  color: var(--color-green);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 23px;
+  font-weight: 700;
+  color: var(--color-charcoal);
+}
+
+.close {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--color-muted);
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.close:hover {
+  background-color: var(--color-fill);
+  color: var(--color-charcoal);
+}
+
+.close:focus-visible {
+  outline: 2px solid var(--color-green);
+  outline-offset: 2px;
+}
+
+.body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 26px 36px 40px;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideOut {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop,
+  .panel,
+  .backdropLeaving,
+  .panelLeaving {
+    animation: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .panel {
+    width: 100vw;
+    min-width: 0;
+  }
+
+  .header {
+    padding: 24px 22px 16px;
+  }
+
+  .body {
+    padding: 20px 22px 32px;
+  }
+}

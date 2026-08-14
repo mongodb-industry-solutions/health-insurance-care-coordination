@@ -1,0 +1,54 @@
+/* A color-washed region, not a card: no border, no shadow, and the wash bleeds
+   past the content edges so it fades into the page instead of stopping at one. */
+
+.zone {
+  position: relative;
+  padding: 26px 24px 30px;
+}
+
+.zone::before {
+  content: "";
+  position: absolute;
+  /* Extends beyond the content box — this bleed is what breaks the card look. */
+  inset: -18px -26px -22px -26px;
+  z-index: 0;
+  border-radius: 48px;
+  background: linear-gradient(
+    135deg,
+    rgba(0, 104, 74, 0.1) 0%,
+    rgba(0, 104, 74, 0.04) 60%,
+    rgba(0, 104, 74, 0) 100%
+  );
+  filter: blur(18px);
+  pointer-events: none;
+}
+
+/* Content stays crisp above the blurred wash. */
+.content {
+  position: relative;
+  z-index: 1;
+}
+
+.title {
+  margin: 0 0 18px;
+  font-family: var(--font-serif);
+  font-size: 21px;
+  font-weight: 700;
+  color: var(--color-green-dark);
+}
+
+.compactList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(0, 104, 74, 0.12);
+}
+
+.empty {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  color: var(--color-muted);
+}
