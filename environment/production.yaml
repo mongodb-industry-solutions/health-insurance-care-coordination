@@ -9,7 +9,7 @@ ownership:
 env:
   NODE_ENV: prod
   AWS_REGION: us-east-1
-  BACKEND_URL: http://health-insurance-backend-web-app:80
+  BACKEND_URL: http://health-insurance-backend-prod-web-app:80
   INSURANCE_AGENT_URL: http://health-insurance-coordination-ui:3000
   CARE_AGENT_URL: http://care-coordination-ui:3000
   AGENT_INVOKE_MODE: http
