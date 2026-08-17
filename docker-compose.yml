@@ -1,10 +1,10 @@
 services:
-  demoname-backend:
+  health-insurance-backend:
     build:
       context: .
       no_cache: true
       dockerfile: Dockerfile.backend
-    image: imagename-backend:latest
+    image: health-insurance-backend:latest
     volumes:
       - ~/.aws/credentials:/root/.aws/credentials:ro
       - ~/.aws/config:/root/.aws/config:ro
@@ -12,14 +12,25 @@ services:
     ports:
       - "8000:8000"
     restart: always
-    container_name: demoname-backend
-  demoname-frontend:
+    container_name: health-insurance-backend
+    networks:
+      - default
+      - insurance_agent_network
+      - care_agent_network
+  health-insurance-frontend:
     build:
       context: .
       no_cache: true
       dockerfile: Dockerfile.frontend
-    image: imagename-frontend:latest
+    image: health-insurance-frontend:latest
     ports:
       - "3000:3000"
     restart: always
-    container_name: demoname-frontend
+    container_name: health-insurance-frontend
+networks:
+  insurance_agent_network:
+    external: true
+    name: health-insurance-coordination_default
+  care_agent_network:
+    external: true
+    name: care-coordination_default
