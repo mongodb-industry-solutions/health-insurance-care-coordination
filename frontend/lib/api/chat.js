@@ -1,7 +1,7 @@
 import { apiFetch } from "./client";
 
-const BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+// See `client.js` — same-origin by default, proxied by `next.config.mjs`.
+const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 /** Events after which the backend sends nothing more. */
 const TERMINAL_EVENTS = new Set(["done", "failed"]);
