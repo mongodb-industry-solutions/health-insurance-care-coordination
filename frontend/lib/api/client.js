@@ -4,8 +4,9 @@
  * `/api/members/MBR-2026-44109`.
  */
 
-const BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+// Empty by default: requests go same-origin and `next.config.mjs` rewrites
+// `/api/*` to the backend.
+const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 export async function apiFetch(path, options = {}) {
   const response = await fetch(`${BASE_URL}${path}`, {
