@@ -19,6 +19,10 @@ features:
 required_secrets:
     aer:
         - OPENAI_API_KEY
+        - OPENAI_BASE_URL
+        - BACKEND_URL
     tools:
         invoke_llm:
             - OPENAI_API_KEY
+            - OPENAI_BASE_URL
+            - BACKEND_URL
