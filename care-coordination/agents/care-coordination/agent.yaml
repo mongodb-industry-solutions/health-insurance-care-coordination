@@ -9,6 +9,9 @@ framework: langgraph
 config:
     provider: openai
     model: gpt-5.4
+network:
+  atlas_clusters:
+    - ist-shared.n0kts.mongodb.net
 features:
     memory: true
 # Declare which secrets each workload may access. Platform-required secrets
@@ -22,6 +25,8 @@ required_secrets:
         - OPENAI_BASE_URL
         - BACKEND_URL
     tools:
+        "*":
+            - BACKEND_URL
         invoke_llm:
             - OPENAI_API_KEY
             - OPENAI_BASE_URL

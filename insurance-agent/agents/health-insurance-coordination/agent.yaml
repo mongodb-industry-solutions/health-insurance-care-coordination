@@ -9,9 +9,9 @@ framework: langgraph
 config:
     provider: openai
     model: gpt-5.4
-# network:
-#   atlas_clusters:
-#     - ist-shared.n0kts.mongodb.net
+network:
+  atlas_clusters:
+    - ist-shared.n0kts.mongodb.net
 #   egress:
 #     - fqdn: grove-gateway-prod.azure-api.net   # or api.anthropic.com if you call Anthropic directly
 #       ports: [443]
@@ -28,6 +28,8 @@ required_secrets:
         - OPENAI_BASE_URL
         - BACKEND_URL
     tools:
+        "*":
+            - BACKEND_URL
         invoke_llm:
             - OPENAI_API_KEY
             - OPENAI_BASE_URL
