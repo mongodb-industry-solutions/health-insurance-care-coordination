@@ -19,7 +19,6 @@ envSecrets:
   # MongoDB Configuration
   MONGODB_URI: health-insurance-secrets
   DATABASE_NAME: health-insurance-secrets
-
   AGENT_BASE_URL: health-insurance-secrets
   INSURANCE_AGENT_API_KEY: health-insurance-secrets
   INSURANCE_AGENT_PROJECT_ID: health-insurance-secrets

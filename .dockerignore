@@ -76,7 +76,8 @@ backend/.venv
 backend/venv
 
 # UV files
-backend/uv.lock
+# uv.lock is required by the Dockerfile's `uv sync --locked` step, so it must
+# stay in the build context.
 backend/.uv-cache
 
 # Distribution / packaging
