@@ -192,8 +192,12 @@ def stream_turn(agent_id: str, message: str, session_id: str | None = None):
     try:
         # Inside the try: a missing platform credential must arrive as a `failed`
         # event too, not an exception escaping the generator after headers are sent.
-        target = agents.target(agent_id)
-
+        try:
+            target = agents.target(agent_id)
+        except RuntimeError as e:
+            logger.error("chat: agent %s misconfigured: %s", agent_id, e)
+            yield sse("failed", {"detail": str(e)})
+            return
         response = None
         if _supports_streaming.get(agent_id, True):
             try:
