@@ -47,12 +47,19 @@ def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
 
 
-def _post(url: str, payload: dict):
-    """Open a POST and hand back the live response object (not the body)."""
+def _post(url: str, payload: dict, extra_headers: dict | None = None):
+    """Open a POST and hand back the live response object (not the body).
+
+    `extra_headers` carries the bearer token in platform mode (see `agents.target()`);
+    empty in local mode, so this stays the same plain call either way.
+    """
+    headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+    if extra_headers:
+        headers.update(extra_headers)
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Accept": "text/event-stream"},
+        headers=headers,
         method="POST",
     )
     return urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS)
@@ -135,10 +142,11 @@ def _iter_stream_frames(response):
 def _non_streaming_turn(agent_id: str, payload: dict):
     """Fallback for an engine build without `/invokeStream`: take the whole reply at
     once and emit it as a single token, so the UI contract is identical either way."""
-    url = f"{agents.base_url(agent_id)}/invoke"
+    target = agents.target(agent_id)
+    url = f"{target['base_url']}/invoke"
     logger.info("chat: falling back to non-streaming %s", url)
 
-    with _post(url, payload) as response:
+    with _post(url, payload, target["headers"]) as response:
         raw = response.read().decode("utf-8", errors="replace")
 
     try:
@@ -182,10 +190,18 @@ def stream_turn(agent_id: str, message: str, session_id: str | None = None):
 
     saw_terminal = False
     try:
+        # Inside the try: a missing platform credential must arrive as a `failed`
+        # event too, not an exception escaping the generator after headers are sent.
+        try:
+            target = agents.target(agent_id)
+        except RuntimeError as e:
+            logger.error("chat: agent %s misconfigured: %s", agent_id, e)
+            yield sse("failed", {"detail": str(e)})
+            return
         response = None
         if _supports_streaming.get(agent_id, True):
             try:
-                response = _post(f"{agents.base_url(agent_id)}/invokeStream", payload)
+                response = _post(f"{target['base_url']}/invokeStream", payload, target["headers"])
                 frames = _iter_stream_frames(response)
             except urllib.error.HTTPError as e:
                 if e.code != 404:
