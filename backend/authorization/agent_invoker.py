@@ -7,9 +7,12 @@ container, so a plain HTTP POST is enough:
          -H 'Content-Type: application/json' \
          -d '{"message": "Hello"}'
 
-The deployed Platform API is a different transport (bearer token, workspace
-targeting) and is not wired up yet — the agent has no registered workspace. Mode
-selection lives here so that when it is, only this file changes.
+Deployed agents run on a different, remote deployment target instead, which speaks
+a different wire contract — see `chat-resources/CLOUD-AGENT-MIGRATION.md` for the
+specifics. `LOCAL_AGENTIC_DEPLOYMENT` (default true) picks between the two — see the
+class docstring — so an existing local/dry-run setup is byte-for-byte unaffected.
+Mode selection lives here so that going from one to the other never touches the
+caller.
 
 `/invoke` blocks until the agent finishes its whole run, which for a prior
 authorization is minutes. It is also plain synchronous `urllib`, so it blocks the
@@ -40,9 +43,26 @@ _DEFAULT_CARE_AGENT_URL = "http://localhost:3002"
 # backend cannot silently fire agent runs at whatever happens to be on port 3001.
 MODE_DRY_RUN = "dry_run"
 MODE_HTTP = "http"
+# The deployed remote transport: project/workspace-scoped URL, bearer auth.
+MODE_PLATFORM = "platform"
 
 INSURANCE_AGENT = "insurance"
 CARE_AGENT = "care_coordination"
+
+# Env var prefix each agent's platform credentials are read under. Not derived from
+# the agent key — `care_coordination` is a workflow role, not an env var namespace —
+# so the mapping is spelled out instead of guessed from the string.
+_PLATFORM_ENV_PREFIX = {
+    INSURANCE_AGENT: "INSURANCE_AGENT",
+    CARE_AGENT: "CARE_AGENT",
+}
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in ("false", "0", "no", "")
 
 
 class AgentInvoker:
@@ -51,18 +71,40 @@ class AgentInvoker:
     Read from the environment rather than passed in, because the caller is an HTTP
     route with no business knowing the transport:
 
-        AGENT_INVOKE_MODE       dry_run (default) | http
-        INSURANCE_AGENT_URL     default http://localhost:3001
-        CARE_AGENT_URL          default http://localhost:3002
-        AGENT_INVOKE_TIMEOUT    seconds to wait for the run (default 900)
+        AGENT_INVOKE_MODE         dry_run (default) | anything else
+        LOCAL_AGENTIC_DEPLOYMENT  true (default) | false
 
-    From inside a container, `localhost` is the container — use
-    http://host.docker.internal:3001 instead.
+    `AGENT_INVOKE_MODE=dry_run` always wins and is unaffected by everything below —
+    it is still the testing default. Otherwise `LOCAL_AGENTIC_DEPLOYMENT` decides:
+
+        # local playground (LOCAL_AGENTIC_DEPLOYMENT=true, the default)
+        INSURANCE_AGENT_URL       default http://localhost:3001
+        CARE_AGENT_URL            default http://localhost:3002
+
+        # deployed remote target (LOCAL_AGENTIC_DEPLOYMENT=false)
+        AGENT_BASE_URL            base URL of the remote deployment target
+        INSURANCE_AGENT_API_KEY / INSURANCE_AGENT_PROJECT_ID / INSURANCE_AGENT_WORKSPACE_ID
+        CARE_AGENT_API_KEY / CARE_AGENT_PROJECT_ID / CARE_AGENT_WORKSPACE_ID
+
+        AGENT_INVOKE_TIMEOUT      seconds to wait for the run (default 900)
+
+    From inside a local container talking to a local playground, `localhost` is the
+    container — use http://host.docker.internal:3001 instead. A deployed backend
+    reaches the remote target over the public `AGENT_BASE_URL`, so this does not
+    apply there.
+
+    See `chat-resources/CLOUD-AGENT-MIGRATION.md` for why the design looks like this.
     """
 
     def __init__(self, mode: str = None, timeout: float = None):
-        self.mode = (mode or os.getenv("AGENT_INVOKE_MODE") or MODE_DRY_RUN).strip().lower()
+        raw_mode = (mode or os.getenv("AGENT_INVOKE_MODE") or MODE_DRY_RUN).strip().lower()
+        if raw_mode == MODE_DRY_RUN:
+            self.mode = MODE_DRY_RUN
+        else:
+            local = _env_flag("LOCAL_AGENTIC_DEPLOYMENT", default=True)
+            self.mode = MODE_HTTP if local else MODE_PLATFORM
         self.timeout = float(timeout or os.getenv("AGENT_INVOKE_TIMEOUT") or 900)
+
         self.urls = {
             INSURANCE_AGENT: (
                 os.getenv("INSURANCE_AGENT_URL") or _DEFAULT_INSURANCE_AGENT_URL
@@ -72,7 +114,47 @@ class AgentInvoker:
             ).rstrip("/"),
         }
 
+        # Fail at construction, not on first invoke: a missing secret must show up as
+        # a startup/first-request error naming exactly which env var is missing, never
+        # as a run that looks like it started and then silently stalls.
+        self._platform = (
+            {agent: self._platform_credentials(agent) for agent in _PLATFORM_ENV_PREFIX}
+            if self.mode == MODE_PLATFORM
+            else {}
+        )
+
+    @staticmethod
+    def _platform_credentials(agent: str) -> dict:
+        prefix = _PLATFORM_ENV_PREFIX[agent]
+        env_names = {
+            "base_url": "AGENT_BASE_URL",
+            "api_key": f"{prefix}_API_KEY",
+            "project_id": f"{prefix}_PROJECT_ID",
+            "workspace_id": f"{prefix}_WORKSPACE_ID",
+        }
+        creds = {key: os.getenv(env_name) for key, env_name in env_names.items()}
+        missing = [env_name for key, env_name in env_names.items() if not creds[key]]
+        if missing:
+            raise RuntimeError(
+                f"LOCAL_AGENTIC_DEPLOYMENT=false (platform mode) for agent {agent!r} "
+                f"but missing env var(s): {', '.join(missing)}"
+            )
+        creds["base_url"] = creds["base_url"].rstrip("/")
+        return creds
+
     def target_url(self, agent: str) -> str:
+        if self.mode == MODE_PLATFORM:
+            try:
+                creds = self._platform[agent]
+            except KeyError:
+                raise ValueError(
+                    f"Unknown agent {agent!r}. Expected one of: "
+                    f"{', '.join(_PLATFORM_ENV_PREFIX)}."
+                )
+            return (
+                f"{creds['base_url']}/projects/{creds['project_id']}"
+                f"/workspaces/{creds['workspace_id']}/invoke"
+            )
         try:
             return f"{self.urls[agent]}/invoke"
         except KeyError:
@@ -109,10 +191,14 @@ class AgentInvoker:
         if session_id:
             body["session_id"] = session_id
 
+        headers = {"Content-Type": "application/json"}
+        if self.mode == MODE_PLATFORM:
+            headers["Authorization"] = f"Bearer {self._platform[agent]['api_key']}"
+
         request = urllib.request.Request(
             url,
             data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
         try:
@@ -120,11 +206,18 @@ class AgentInvoker:
                 raw = response.read().decode("utf-8", errors="replace")
             logger.info("agent %s run finished (%s)", agent, url)
             try:
-                return {"ok": True, "mode": self.mode, "url": url, "response": json.loads(raw)}
+                parsed = json.loads(raw)
             except json.JSONDecodeError:
                 # OE may answer with a stream or plain text; the body is a courtesy
                 # here, not the result. Progress is read off the audit trace.
                 return {"ok": True, "mode": self.mode, "url": url, "response": raw[:2000]}
+            result = {"ok": True, "mode": self.mode, "url": url, "response": parsed}
+            # Captured purely for logging / correlating a backend run with a
+            # platform-side execution when debugging — nothing here reads it back.
+            execution_id = parsed.get("execution_id") if isinstance(parsed, dict) else None
+            if execution_id:
+                result["execution_id"] = execution_id
+            return result
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", errors="replace")[:2000]
             logger.error("agent %s rejected the message: %s %s", agent, e.code, detail)
