@@ -35,6 +35,27 @@ def register(app: App) -> None:
     # =========================================================================
 
     @app.tool(is_local=False)
+    def debug_backend_probe() -> str:
+        """TEMPORARY: probe the backend and report what actually comes back.
+
+        Diagnostic only — remove once backend connectivity is settled. Every other
+        tool follows redirects and parses JSON, which turns an SSO redirect into a
+        misleading "Expecting value: line 1 column 1" parse error. This reports the
+        raw first response instead.
+        """
+        url = f"{_get_backend_url()}/api/members/MBR-2026-44109"
+        try:
+            r = requests.get(url, timeout=15, allow_redirects=False)
+            return json.dumps({
+                "status": r.status_code,
+                "content_type": r.headers.get("content-type"),
+                "location": r.headers.get("location"),
+                "body_start": r.text[:300],
+            })
+        except requests.RequestException as e:
+            return json.dumps({"transport_error": str(e)})
+
+    @app.tool(is_local=False)
     def get_current_date(timezone_name: str = "UTC") -> str:
         """Return today's date in ISO 8601 format for an IANA timezone.
 

@@ -3,22 +3,33 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-import requests
 from magenta_sdklanggraph import App
+from pymongo.errors import PyMongoError
+
+from . import data_access as da
+from .data.audit.models import AuditTrace, MemberTracesResponse
+from .data.claims.models import RefillGapsResponse
+from .data.guidelines.models import (
+    ClassificationResponse,
+    GuidelineResponse,
+    RecommendationResponse,
+    StepTherapyResponse,
+)
+from .data.members.models import (
+    ConceptMatchResponse,
+    Member,
+    MemberClinicalContext,
+    OpenCaseResponse,
+    TrialHistoryResponse,
+)
 
 
 # Who this agent is on the audit trail. Matches the `system:` vocabulary the trace
 # already uses for `audit.triggeredBy` and `review.closedBy`.
 AGENT_IDENTITY = "system:care_coordination_agent"
-
-
-def _get_backend_url() -> str:
-    """Get the backend service URL. Configurable via env var, defaults to Kubernetes DNS."""
-    return os.environ.get("BACKEND_URL", "http://backend-service:8000")
 
 
 def register(app: App) -> None:
@@ -69,6 +80,12 @@ def register(app: App) -> None:
         return json.dumps({"found": True, "profile": memory_context})
 
     # --- Care Coordination Domain Tools ---
+    #
+    # These read and write MongoDB in-process through `data_access`, which holds the
+    # service instances and reproduces the response shaping FastAPI's `response_model`
+    # used to do. Where a former route did more than dispatch — reshaping a payload,
+    # parsing an argument, applying a default — that work is inlined here and noted,
+    # because deleting `routes.py` would otherwise have dropped it silently.
 
     @app.tool(is_local=False)
     def get_member_clinical_context(member_id: str) -> str:
@@ -82,17 +99,12 @@ def register(app: App) -> None:
             member_id: The member's unique ID (e.g., MBR-2026-44109).
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(
-                f"{backend_url}/api/members/{member_id}/clinical-context",
-                timeout=5,
-            )
-            if response.status_code == 404:
-                return json.dumps({"error": f"Member {member_id} not found"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to retrieve member context: {str(e)}"})
+            context = da.members().get_clinical_context(member_id)
+            if not context:
+                return da.error(f"Member {member_id} not found")
+            return da.respond(MemberClinicalContext, context)
+        except PyMongoError as e:
+            return da.error(f"Failed to retrieve member context: {str(e)}")
 
     @app.tool(is_local=False)
     def get_open_case(member_id: str) -> str:
@@ -117,17 +129,12 @@ def register(app: App) -> None:
             member_id: The member's unique ID (e.g., MBR-2026-44109).
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(
-                f"{backend_url}/api/members/{member_id}/open-case",
-                timeout=5,
-            )
-            if response.status_code == 404:
-                return json.dumps({"error": f"Member {member_id} not found"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to retrieve open case: {str(e)}"})
+            result = da.members().get_open_case(member_id)
+            if result is None:
+                return da.error(f"Member {member_id} not found")
+            return da.respond(OpenCaseResponse, result)
+        except PyMongoError as e:
+            return da.error(f"Failed to retrieve open case: {str(e)}")
 
     @app.tool(is_local=False)
     def match_clinical_concept(member_id: str, requested_treatment: str) -> str:
@@ -151,18 +158,14 @@ def register(app: App) -> None:
                 (e.g. "biologic therapy - secukinumab") both work.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(
-                f"{backend_url}/api/members/{member_id}/concept-match",
-                params={"requested_treatment": requested_treatment},
-                timeout=5,
+            result = da.members().match_clinical_concept(
+                member_id=member_id, requested_treatment=requested_treatment
             )
-            if response.status_code == 404:
-                return json.dumps({"error": f"Member {member_id} not found"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to match clinical concept: {str(e)}"})
+            if result is None:
+                return da.error(f"Member {member_id} not found")
+            return da.respond(ConceptMatchResponse, result)
+        except PyMongoError as e:
+            return da.error(f"Failed to match clinical concept: {str(e)}")
 
     @app.tool(is_local=False)
     def get_applicable_guideline(condition_code: str, member_id: str) -> str:
@@ -180,17 +183,25 @@ def register(app: App) -> None:
                 decision trace's contextSnapshot.guidelineRef when the case is processed.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(
-                f"{backend_url}/api/guidelines/condition/{condition_code}",
-                timeout=5,
+            guideline = da.guidelines().get_guideline_for_condition(condition_code)
+            if not guideline:
+                return da.error(f"No guideline found for condition {condition_code}")
+            # The former route projected the stored document onto the response shape,
+            # renaming `_id` to `guideline_id`. Returning the raw document instead
+            # would hand the model an `_id` and no `guideline_id`.
+            return da.respond(
+                GuidelineResponse,
+                {
+                    "guideline_id": guideline.get("_id"),
+                    "condition": guideline.get("condition"),
+                    "effective_date": guideline.get("effective_date"),
+                    "classification": guideline.get("classification"),
+                    "criteria": guideline.get("criteria"),
+                    "confidence_threshold": guideline.get("confidence_threshold"),
+                },
             )
-            if response.status_code == 404:
-                return json.dumps({"error": f"No guideline found for condition {condition_code}"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to retrieve guideline: {str(e)}"})
+        except PyMongoError as e:
+            return da.error(f"Failed to retrieve guideline: {str(e)}")
 
     @app.tool(is_local=False)
     def classify_treatment(condition_code: str, requested_treatment: str) -> str:
@@ -213,20 +224,14 @@ def register(app: App) -> None:
                 ("biologic therapy - secukinumab") both work.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(
-                f"{backend_url}/api/guidelines/condition/{condition_code}/classify",
-                params={"requested_treatment": requested_treatment},
-                timeout=5,
+            result = da.guidelines().classify_treatment(
+                condition_code=condition_code, requested_treatment=requested_treatment
             )
-            if response.status_code == 404:
-                return json.dumps(
-                    {"error": f"No guideline found for condition {condition_code}"}
-                )
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to classify treatment: {str(e)}"})
+            if result is None:
+                return da.error(f"No guideline found for condition {condition_code}")
+            return da.respond(ClassificationResponse, result)
+        except PyMongoError as e:
+            return da.error(f"Failed to classify treatment: {str(e)}")
 
     @app.tool(is_local=False)
     def evaluate_step_therapy(
@@ -253,26 +258,19 @@ def register(app: App) -> None:
             effective_trial_months: `effective_trial_months` from review_trial_history.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(
-                f"{backend_url}/api/guidelines/condition/{condition_code}/step-therapy",
-                params={
-                    "documented_drug": documented_drug,
-                    # The backend query param keeps its original name; only the
-                    # tool-facing argument is renamed, to stop the model reaching for
-                    # the record's documented figure instead of the effective one.
-                    "documented_months": effective_trial_months,
-                },
-                timeout=5,
+            result = da.guidelines().evaluate_step_therapy(
+                condition_code=condition_code,
+                documented_drug=documented_drug,
+                # The service keeps its original parameter name; only the tool-facing
+                # argument is renamed, to stop the model reaching for the record's
+                # documented figure instead of the effective one.
+                documented_months=effective_trial_months,
             )
-            if response.status_code == 404:
-                return json.dumps(
-                    {"error": f"No guideline found for condition {condition_code}"}
-                )
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to evaluate step therapy: {str(e)}"})
+            if result is None:
+                return da.error(f"No guideline found for condition {condition_code}")
+            return da.respond(StepTherapyResponse, result)
+        except PyMongoError as e:
+            return da.error(f"Failed to evaluate step therapy: {str(e)}")
 
     @app.tool(is_local=False)
     def review_trial_history(member_id: str, drug: str) -> str:
@@ -311,18 +309,17 @@ def register(app: App) -> None:
                 step_therapy_drug (e.g. "Methotrexate").
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(
-                f"{backend_url}/api/members/{member_id}/trial-history",
-                params={"drug": drug},
-                timeout=5,
+            # `cadence_days` and `gap_factor` were route-level defaults, not service
+            # defaults, and the tool never exposed them. Passing them explicitly keeps
+            # the derived durations identical to what the HTTP path produced.
+            result = da.members().review_trial_history(
+                member_id=member_id, drug=drug, cadence_days=30, gap_factor=1.5
             )
-            if response.status_code == 404:
-                return json.dumps({"error": f"Member {member_id} not found"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to review trial history: {str(e)}"})
+            if result is None:
+                return da.error(f"Member {member_id} not found")
+            return da.respond(TrialHistoryResponse, result)
+        except PyMongoError as e:
+            return da.error(f"Failed to review trial history: {str(e)}")
 
     @app.tool(is_local=False)
     def detect_refill_gaps(member_id: str, drug: str = "") -> str:
@@ -342,19 +339,13 @@ def register(app: App) -> None:
             drug: Optional drug display name (e.g. "Methotrexate") to scope the check.
         """
         try:
-            backend_url = _get_backend_url()
-            params = {}
-            if drug:
-                params["drug"] = drug
-            response = requests.get(
-                f"{backend_url}/api/claims/member/{member_id}/refill-gaps",
-                params=params,
-                timeout=5,
-            )
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to detect refill gaps: {str(e)}"})
+            # An omitted drug was previously an absent query param, which arrived as
+            # None. Forwarding "" instead would filter on the empty string and match
+            # nothing.
+            result = da.claims().detect_refill_gaps(member_id, drug=drug or None)
+            return da.respond(RefillGapsResponse, result)
+        except PyMongoError as e:
+            return da.error(f"Failed to detect refill gaps: {str(e)}")
 
     @app.tool(is_local=False)
     def resolve_refill_gap(
@@ -390,29 +381,20 @@ def register(app: App) -> None:
                 (e.g. "NOTE-44109-hold"). Never invent one.
         """
         try:
-            backend_url = _get_backend_url()
-            params = {
-                "drug": drug,
-                "effective_trial_months": effective_trial_months,
-                "conclusion": conclusion,
-            }
-            if related_note:
-                params["related_note"] = related_note
-            response = requests.post(
-                f"{backend_url}/api/members/{member_id}/gap-resolution",
-                params=params,
-                timeout=5,
+            member = da.members().resolve_refill_gap(
+                member_id=member_id,
+                drug=drug,
+                effective_trial_months=effective_trial_months,
+                conclusion=conclusion,
+                # An omitted note must be None, not "": the service distinguishes
+                # "no note given" from a note whose id is blank.
+                related_note=related_note or None,
             )
-            if response.status_code == 404:
-                try:
-                    detail = response.json().get("detail", "not found")
-                except ValueError:
-                    detail = "route not found (is the backend up to date?)"
-                return json.dumps({"error": f"gap-resolution 404: {detail}"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to resolve refill gap: {str(e)}"})
+            if not member:
+                return da.error(f"Member {member_id} not found")
+            return da.respond(Member, member)
+        except PyMongoError as e:
+            return da.error(f"Failed to resolve refill gap: {str(e)}")
 
     @app.tool(is_local=False)
     def compute_recommendation(
@@ -443,25 +425,29 @@ def register(app: App) -> None:
             coverage_restriction: "partial" if Step 2 flagged partial coverage,
                 otherwise "none".
         """
+        # The service takes a list of floats; the comma-separated string is the
+        # tool-facing contract the docstring documents. The former route did this
+        # parse and answered a malformed list with a 422 rather than a stack trace.
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(
-                f"{backend_url}/api/guidelines/condition/{condition_code}/recommendation",
-                params={
-                    "step_confidences": step_confidences,
-                    "criteria_satisfied": criteria_satisfied,
-                    "coverage_restriction": coverage_restriction,
-                },
-                timeout=5,
+            parsed = [float(part) for part in step_confidences.split(",") if part.strip()]
+        except ValueError:
+            return da.error(
+                "step_confidences must be a comma-separated list of numbers, "
+                "e.g. '0.98,0.97,0.95,0.90'"
             )
-            if response.status_code == 404:
-                return json.dumps(
-                    {"error": f"No guideline found for condition {condition_code}"}
-                )
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to compute recommendation: {str(e)}"})
+
+        try:
+            result = da.guidelines().compute_recommendation(
+                condition_code=condition_code,
+                step_confidences=parsed,
+                criteria_satisfied=criteria_satisfied,
+                coverage_restriction=coverage_restriction,
+            )
+            if result is None:
+                return da.error(f"No guideline found for condition {condition_code}")
+            return da.respond(RecommendationResponse, result)
+        except PyMongoError as e:
+            return da.error(f"Failed to compute recommendation: {str(e)}")
 
     @app.tool(is_local=False)
     def record_reasoning_step(
@@ -493,33 +479,27 @@ def register(app: App) -> None:
             confidence: The `confidence` the step's tool returned.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.post(
-                f"{backend_url}/api/audit/traces/{trace_id}/steps",
-                params={
-                    "memory_type": memory_type,
-                    "name": name,
-                    "detail": detail,
-                    "confidence": confidence,
-                    # Stamped here, not asked of the model: two agents write to one
-                    # trace, and the record has to be able to attribute every step. A
-                    # value the LLM chose would be a value it could get wrong.
-                    "recorded_by": AGENT_IDENTITY,
-                },
-                timeout=5,
+            trace = da.audit().append_step(
+                trace_id=trace_id,
+                memory_type=memory_type,
+                name=name,
+                detail=detail,
+                confidence=confidence,
+                # Stamped here, not asked of the model: two agents write to one
+                # trace, and the record has to be able to attribute every step. A
+                # value the LLM chose would be a value it could get wrong.
+                recorded_by=AGENT_IDENTITY,
             )
-            if response.status_code == 404:
-                return json.dumps({"error": f"Trace {trace_id} not found"})
-            if response.status_code == 400:
-                try:
-                    detail_msg = response.json().get("detail", "invalid request")
-                except ValueError:
-                    detail_msg = "invalid request"
-                return json.dumps({"error": f"Step not recorded: {detail_msg}"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to record reasoning step: {str(e)}"})
+            return da.respond(AuditTrace, trace)
+        # The service signals a missing trace and an invalid step by exception, which
+        # the former route mapped to 404 and 400. Both must stay distinguishable: one
+        # means Step 0 never ran, the other that the step itself was rejected.
+        except LookupError:
+            return da.error(f"Trace {trace_id} not found")
+        except ValueError as e:
+            return da.error(f"Step not recorded: {str(e)}")
+        except PyMongoError as e:
+            return da.error(f"Failed to record reasoning step: {str(e)}")
 
     @app.tool(is_local=False)
     def record_recommendation(
@@ -543,28 +523,19 @@ def register(app: App) -> None:
             confidence: The aggregate confidence from compute_recommendation.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.post(
-                f"{backend_url}/api/audit/traces/{trace_id}/recommendation",
-                params={
-                    "decision": decision,
-                    "rationale": rationale,
-                    "confidence": confidence,
-                },
-                timeout=5,
+            trace = da.audit().record_recommendation(
+                trace_id=trace_id,
+                decision=decision,
+                rationale=rationale,
+                confidence=confidence,
             )
-            if response.status_code == 404:
-                return json.dumps({"error": f"Trace {trace_id} not found"})
-            if response.status_code == 400:
-                try:
-                    detail_msg = response.json().get("detail", "invalid request")
-                except ValueError:
-                    detail_msg = "invalid request"
-                return json.dumps({"error": f"Recommendation not recorded: {detail_msg}"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to record recommendation: {str(e)}"})
+            return da.respond(AuditTrace, trace)
+        except LookupError:
+            return da.error(f"Trace {trace_id} not found")
+        except ValueError as e:
+            return da.error(f"Recommendation not recorded: {str(e)}")
+        except PyMongoError as e:
+            return da.error(f"Failed to record recommendation: {str(e)}")
 
     @app.tool(is_local=False)
     def get_member_authorizations(member_id: str) -> str:
@@ -578,12 +549,12 @@ def register(app: App) -> None:
             member_id: The member's unique ID.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(
-                f"{backend_url}/api/audit/member/{member_id}/traces",
-                timeout=5,
+            # The service returns a bare list; the count and member_id wrapper were
+            # added by the route and are part of the shape the model expects.
+            traces = da.audit().get_member_traces(member_id)
+            return da.respond(
+                MemberTracesResponse,
+                {"member_id": member_id, "trace_count": len(traces), "traces": traces},
             )
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to retrieve authorizations: {str(e)}"})
+        except PyMongoError as e:
+            return da.error(f"Failed to retrieve authorizations: {str(e)}")

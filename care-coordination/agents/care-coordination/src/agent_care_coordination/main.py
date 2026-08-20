@@ -5,9 +5,15 @@ the clinical assessment. It picks up a case the Insurance Agent already opened,
 reasons over the member's record and the applicable guideline, and records a
 recommendation on the decision trace. It never routes or closes a case.
 
-The agent holds no database driver. Every domain read and write is an HTTP call to
-the FastAPI service (`BACKEND_URL`), which owns the data and enforces the
-authority rules deterministically, server-side.
+Every domain read and write goes straight to MongoDB in-process, through the
+vendored data layer in `data/` (services and repositories lifted from the backend,
+minus its HTTP routes). `data_access` holds the service instances and reproduces
+the response shaping the FastAPI layer used to do. The authority rules still live
+in that service code and are still applied deterministically — what went away is
+the network hop, not the enforcement.
+
+Requires `MONGODB_URI` (platform-injected) and `DATABASE_NAME` (declared in
+agent.yaml). The application database is separate from the platform's own store.
 
 The platform launches this code in supported runtime roles:
     RUNNER_MODE=aer            -> Full LangGraph execution
