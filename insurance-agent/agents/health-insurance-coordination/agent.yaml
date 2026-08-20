@@ -22,15 +22,19 @@ network:
 # Declare which secrets each workload may access. Platform-required secrets
 # (MONGODB_URI, VOYAGE_API_KEY) are always injected and do not need to be listed.
 
+
+# MONGODB_URI is injected, but DATABASE_NAME is not: the platform only scopes its
+# own store DB (mdb_store, via runner_shared.db_config). Application collections
+# live in a database this app names itself, so the tool pods have to be told which.
+# BACKEND_URL is gone — the tools read MongoDB in-process, there is no backend call.
 required_secrets:
     aer:
         - OPENAI_API_KEY
         - OPENAI_BASE_URL
-        - BACKEND_URL
+        - DATABASE_NAME
     tools:
         "*":
-            - BACKEND_URL
+            - DATABASE_NAME
         invoke_llm:
             - OPENAI_API_KEY
             - OPENAI_BASE_URL
-            - BACKEND_URL

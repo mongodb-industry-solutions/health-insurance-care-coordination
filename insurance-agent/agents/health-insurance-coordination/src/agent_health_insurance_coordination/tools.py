@@ -6,54 +6,52 @@ and Steps 8-9 (route the decision, close the case) — plus the bulk-retrieval
 tools that back operational queues and dashboards. Steps 3-7 are clinical and
 belong to the care-coordination agent; this agent reads their recommendation back
 off the trace with `get_audit_trace`.
+
+Data access is in-process: the tools call the vendored services in `data/` through
+`data_access`, which holds the service instances and reproduces the response
+shaping FastAPI's `response_model` used to do. Where a former route did more than
+dispatch — wrapping a list, converting "" to None, translating a refusal — that
+work is inlined here and noted, because deleting `routes.py` would otherwise have
+dropped it silently.
+
+The services signal a missing subject with `LookupError` and a *refused* request
+with `ValueError`; the routes mapped these to 404 and 400. That second case is
+load-bearing for this agent: the closure and claim-status guardrails express
+bounded authority by refusing, so a refusal is a correct answer to be escalated,
+never a transient failure to retry.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-import requests
 from magenta_sdklanggraph import App
+from pymongo.errors import PyMongoError
 
+from . import data_access as da
+from .data.audit.models import AuditTrace, RoutingDecisionResponse, TracesListResponse
+from .data.claims.models import Claim, ClaimsList
+from .data.members.models import (
+    Member,
+    MemberList,
+    MemberSummaryResponse,
+    PendingActionUpdateResponse,
+    PendingAuthorizationsResponse,
+)
+from .data.plans.models import CoverageCheckResponse, Plan, PlansListResponse
+from .data.policies.models import EligibilityCheckResponse, PoliciesListResponse, Policy
 
 # Who this agent is on the audit trail. Matches `audit.triggeredBy`, so a trace
 # attributes its steps in the same vocabulary it attributes its creation.
 AGENT_IDENTITY = "system:insurance_agent"
 
 
-def _get_backend_url() -> str:
-    """Get the backend service URL. Configurable via env var, defaults to Kubernetes DNS."""
-    return os.environ.get("BACKEND_URL", "http://backend-service:8000")
-
-
 def register(app: App) -> None:
     # =========================================================================
     # Scaffold / platform tools
     # =========================================================================
-
-    @app.tool(is_local=False)
-    def debug_backend_probe() -> str:
-        """TEMPORARY: probe the backend and report what actually comes back.
-
-        Diagnostic only — remove once backend connectivity is settled. Every other
-        tool follows redirects and parses JSON, which turns an SSO redirect into a
-        misleading "Expecting value: line 1 column 1" parse error. This reports the
-        raw first response instead.
-        """
-        url = f"{_get_backend_url()}/api/members/MBR-2026-44109"
-        try:
-            r = requests.get(url, timeout=15, allow_redirects=False)
-            return json.dumps({
-                "status": r.status_code,
-                "content_type": r.headers.get("content-type"),
-                "location": r.headers.get("location"),
-                "body_start": r.text[:300],
-            })
-        except requests.RequestException as e:
-            return json.dumps({"transport_error": str(e)})
 
     @app.tool(is_local=False)
     def get_current_date(timezone_name: str = "UTC") -> str:
@@ -127,14 +125,12 @@ def register(app: App) -> None:
             member_id: Member business key, e.g. MBR-2026-73305.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(f"{backend_url}/api/members/{member_id}", timeout=5)
-            if response.status_code == 404:
-                return json.dumps({"error": f"Member {member_id} not found"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to retrieve member: {str(e)}"})
+            doc = da.members().get_member(member_id)
+            if not doc:
+                return da.error(f"Member {member_id} not found")
+            return da.respond(Member, doc)
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to retrieve member: {str(e)}")
 
     @app.tool(is_local=False)
     def get_policy_by_id(policy_id: str) -> str:
@@ -144,14 +140,12 @@ def register(app: App) -> None:
             policy_id: Policy business key, e.g. POL-HP-2026-08841.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(f"{backend_url}/api/policies/{policy_id}", timeout=5)
-            if response.status_code == 404:
-                return json.dumps({"error": f"Policy {policy_id} not found"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to retrieve policy: {str(e)}"})
+            doc = da.policies().get_policy(policy_id)
+            if not doc:
+                return da.error(f"Policy {policy_id} not found")
+            return da.respond(Policy, doc)
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to retrieve policy: {str(e)}")
 
     @app.tool(is_local=False)
     def get_plan_by_id(plan_id: str) -> str:
@@ -161,14 +155,12 @@ def register(app: App) -> None:
             plan_id: Plan business key, e.g. PLAN-PPO-SPEC-4471.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(f"{backend_url}/api/plans/{plan_id}", timeout=5)
-            if response.status_code == 404:
-                return json.dumps({"error": f"Plan {plan_id} not found"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to retrieve plan: {str(e)}"})
+            doc = da.plans().get_plan(plan_id)
+            if not doc:
+                return da.error(f"Plan {plan_id} not found")
+            return da.respond(Plan, doc)
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to retrieve plan: {str(e)}")
 
     @app.tool(is_local=False)
     def get_audit_trace(trace_id: str) -> str:
@@ -184,17 +176,18 @@ def register(app: App) -> None:
             trace_id: Trace business key, e.g. TRC-2026-PA-00552.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(f"{backend_url}/api/audit/traces/{trace_id}", timeout=5)
-            if response.status_code == 404:
-                return json.dumps({"error": f"Trace {trace_id} not found"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to retrieve trace: {str(e)}"})
+            doc = da.audit().get_trace(trace_id)
+            if not doc:
+                return da.error(f"Trace {trace_id} not found")
+            return da.respond(AuditTrace, doc)
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to retrieve trace: {str(e)}")
 
     # =========================================================================
     # 2. Bulk / list retrieval
+    #
+    # The services return bare lists; the `{count, <name>}` envelope was added by
+    # the routes and is part of the shape the model expects.
     # =========================================================================
 
     @app.tool(is_local=False)
@@ -205,12 +198,10 @@ def register(app: App) -> None:
         are working one member's case, use `get_member_by_id` instead.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(f"{backend_url}/api/members", timeout=5)
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to list members: {str(e)}"})
+            members = da.members().list_all_members()
+            return da.respond(MemberList, {"count": len(members), "members": members})
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to list members: {str(e)}")
 
     @app.tool(is_local=False)
     def list_all_policies() -> str:
@@ -220,12 +211,12 @@ def register(app: App) -> None:
         `get_policy_by_id` for a single case.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(f"{backend_url}/api/policies", timeout=5)
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to list policies: {str(e)}"})
+            policies = da.policies().list_all_policies()
+            return da.respond(
+                PoliciesListResponse, {"count": len(policies), "policies": policies}
+            )
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to list policies: {str(e)}")
 
     @app.tool(is_local=False)
     def list_all_plans() -> str:
@@ -235,12 +226,10 @@ def register(app: App) -> None:
         single case, use `get_plan_by_id`.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(f"{backend_url}/api/plans", timeout=5)
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to list plans: {str(e)}"})
+            plans = da.plans().list_all_plans()
+            return da.respond(PlansListResponse, {"count": len(plans), "plans": plans})
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to list plans: {str(e)}")
 
     @app.tool(is_local=False)
     def list_all_claims() -> str:
@@ -251,12 +240,10 @@ def register(app: App) -> None:
         applied. Use it for claim-queue and financial views.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(f"{backend_url}/api/claims", timeout=5)
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to list claims: {str(e)}"})
+            claims = da.claims().list_all_claims()
+            return da.respond(ClaimsList, {"count": len(claims), "claims": claims})
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to list claims: {str(e)}")
 
     @app.tool(is_local=False)
     def list_all_audit_traces() -> str:
@@ -267,12 +254,10 @@ def register(app: App) -> None:
         `get_audit_trace`.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(f"{backend_url}/api/audit/traces", timeout=5)
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to list traces: {str(e)}"})
+            traces = da.audit().list_all_traces()
+            return da.respond(TracesListResponse, {"count": len(traces), "traces": traces})
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to list traces: {str(e)}")
 
     @app.tool(is_local=False)
     def list_pending_authorizations() -> str:
@@ -284,14 +269,12 @@ def register(app: App) -> None:
         answer "what is waiting on us" without scanning every member.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(
-                f"{backend_url}/api/members/pending-authorizations", timeout=5
+            members = da.members().list_pending_authorizations()
+            return da.respond(
+                PendingAuthorizationsResponse, {"count": len(members), "members": members}
             )
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to list pending authorizations: {str(e)}"})
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to list pending authorizations: {str(e)}")
 
     # =========================================================================
     # 3. Eligibility & coverage checks
@@ -315,28 +298,20 @@ def register(app: App) -> None:
             service_date: Date of service as YYYY-MM-DD. Defaults to today on the
                 backend when omitted.
         """
-        params = {}
-        if service_date:
-            params["service_date"] = service_date
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(
-                f"{backend_url}/api/policies/{policy_id}/eligibility",
-                params=params,
-                timeout=5,
+            # An omitted date was previously an absent query param, arriving as None,
+            # which the service reads as "today". Forwarding "" instead would be
+            # parsed as a date and rejected.
+            result = da.policies().verify_eligibility_on_date(
+                policy_id, service_date=service_date or None
             )
-            if response.status_code == 404:
-                return json.dumps({"error": f"Policy {policy_id} not found"})
-            if response.status_code == 400:
-                try:
-                    detail = response.json().get("detail", "invalid request")
-                except ValueError:
-                    detail = "invalid request"
-                return json.dumps({"error": f"Eligibility check rejected: {detail}"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to verify eligibility: {str(e)}"})
+        except ValueError as e:
+            return da.refused(f"Eligibility check rejected: {str(e)}")
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to verify eligibility: {str(e)}")
+        if not result:
+            return da.error(f"Policy {policy_id} not found")
+        return da.respond(EligibilityCheckResponse, result)
 
     @app.tool(is_local=False)
     def check_treatment_coverage(
@@ -374,30 +349,23 @@ def register(app: App) -> None:
             drug: Therapy name, e.g. "secukinumab". Used only when no code is
                 available; matched against the plan's treatment names.
         """
-        params = {"condition": condition}
-        if treatment_code:
-            params["treatment_code"] = treatment_code
-        if drug:
-            params["drug"] = drug
         try:
-            backend_url = _get_backend_url()
-            response = requests.get(
-                f"{backend_url}/api/plans/{plan_id}/coverage",
-                params=params,
-                timeout=5,
+            # Both identifiers must be None when unset: the service picks its match
+            # strategy on which one is present, and "" would read as a supplied value
+            # that matches nothing.
+            result = da.plans().check_treatment_coverage(
+                plan_id,
+                condition=condition,
+                treatment_code=treatment_code or None,
+                drug=drug or None,
             )
-            if response.status_code == 404:
-                return json.dumps({"error": f"Plan {plan_id} not found"})
-            if response.status_code == 400:
-                try:
-                    detail = response.json().get("detail", "invalid request")
-                except ValueError:
-                    detail = "invalid request"
-                return json.dumps({"error": f"Coverage check rejected: {detail}"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to check treatment coverage: {str(e)}"})
+        except ValueError as e:
+            return da.refused(f"Coverage check rejected: {str(e)}")
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to check treatment coverage: {str(e)}")
+        if not result:
+            return da.error(f"Plan {plan_id} not found")
+        return da.respond(CoverageCheckResponse, result)
 
     # =========================================================================
     # 4. Claim management
@@ -435,32 +403,24 @@ def register(app: App) -> None:
             claim_type: specialty_pharmacy, pharmacy, medical or dental.
             service_date: Date of service as YYYY-MM-DD. Defaults to today.
         """
-        params = {
-            "member_id": member_id,
-            "procedure_code": procedure_code,
-            "procedure_desc": procedure_desc,
-            "diagnosis_code": diagnosis_code,
-            "diagnosis_display": diagnosis_display,
-            "billed_amt": billed_amt,
-            "claim_type": claim_type,
-        }
-        if service_date:
-            params["service_date"] = service_date
         try:
-            backend_url = _get_backend_url()
-            response = requests.post(f"{backend_url}/api/claims", params=params, timeout=10)
-            if response.status_code == 404:
-                return json.dumps({"error": f"Member {member_id} not found"})
-            if response.status_code == 400:
-                try:
-                    detail = response.json().get("detail", "invalid request")
-                except ValueError:
-                    detail = "invalid request"
-                return json.dumps({"error": f"Claim not created: {detail}"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to create claim: {str(e)}"})
+            claim = da.claims().create_claim(
+                member_id=member_id,
+                procedure_code=procedure_code,
+                procedure_desc=procedure_desc,
+                diagnosis_code=diagnosis_code,
+                diagnosis_display=diagnosis_display,
+                billed_amt=billed_amt,
+                claim_type=claim_type,
+                service_date=service_date or None,
+            )
+            return da.respond(Claim, claim)
+        except LookupError:
+            return da.error(f"Member {member_id} not found")
+        except ValueError as e:
+            return da.refused(f"Claim not created: {str(e)}")
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to create claim: {str(e)}")
 
     @app.tool(is_local=False)
     def update_claim_status(
@@ -488,33 +448,24 @@ def register(app: App) -> None:
                 benefit_exclusion_specialty_tier_not_covered, step_therapy_not_met.
             linked_audit_trace_id: Trace that decided this claim.
         """
-        params = {
-            "claim_id": claim_id,
-            "status": status,
-            "paid_amt": paid_amt,
-            "member_owed": member_owed,
-        }
-        if denial_reason:
-            params["denial_reason"] = denial_reason
-        if linked_audit_trace_id:
-            params["linked_audit_trace_id"] = linked_audit_trace_id
         try:
-            backend_url = _get_backend_url()
-            response = requests.post(
-                f"{backend_url}/api/claims/{claim_id}/status", params=params, timeout=5
+            claim = da.claims().update_claim_status(
+                claim_id=claim_id,
+                status=status,
+                paid_amt=paid_amt,
+                member_owed=member_owed,
+                denial_reason=denial_reason or None,
+                linked_audit_trace_id=linked_audit_trace_id or None,
             )
-            if response.status_code == 404:
-                return json.dumps({"error": f"Claim {claim_id} not found"})
-            if response.status_code == 400:
-                try:
-                    detail = response.json().get("detail", "invalid request")
-                except ValueError:
-                    detail = "invalid request"
-                return json.dumps({"error": f"Claim update blocked: {detail}"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to update claim: {str(e)}"})
+            return da.respond(Claim, claim)
+        except LookupError:
+            return da.error(f"Claim {claim_id} not found")
+        # The claim/trace consistency guardrail. A refusal is the correct answer:
+        # resolve the trace, do not retry the status change.
+        except ValueError as e:
+            return da.refused(f"Claim update blocked: {str(e)}")
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to update claim: {str(e)}")
 
     # =========================================================================
     # 5. Audit trace management
@@ -549,31 +500,24 @@ def register(app: App) -> None:
                 separated by ";" — e.g. "policy ACTIVE on 2026-07-20;J3590 covered
                 under specialty tier".
         """
-        params = {
-            "subject_ref": subject_ref,
-            "decision_type": decision_type,
-            "subject_type": subject_type,
-            "triggered_by": triggered_by,
-        }
-        if guideline_ref:
-            params["guideline_ref"] = guideline_ref
-        if input_facts:
-            params["input_facts"] = input_facts
         try:
-            backend_url = _get_backend_url()
-            response = requests.post(f"{backend_url}/api/audit/traces", params=params, timeout=5)
-            if response.status_code == 404:
-                return json.dumps({"error": f"Subject {subject_ref} not found"})
-            if response.status_code == 400:
-                try:
-                    detail = response.json().get("detail", "invalid request")
-                except ValueError:
-                    detail = "invalid request"
-                return json.dumps({"error": f"Trace not created: {detail}"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to create trace: {str(e)}"})
+            trace = da.audit().create_trace(
+                subject_ref=subject_ref,
+                decision_type=decision_type,
+                subject_type=subject_type,
+                triggered_by=triggered_by,
+                guideline_ref=guideline_ref or None,
+                input_facts=input_facts or None,
+                # The route always passed this through; the tool has never exposed it.
+                requested_service=None,
+            )
+            return da.respond(AuditTrace, trace)
+        except LookupError:
+            return da.error(f"Subject {subject_ref} not found")
+        except ValueError as e:
+            return da.refused(f"Trace not created: {str(e)}")
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to create trace: {str(e)}")
 
     @app.tool(is_local=False)
     def append_reasoning_step(
@@ -606,40 +550,34 @@ def register(app: App) -> None:
             step_input: What the step consumed — a JSON object or short prose.
             step_output: What the step produced — a JSON object or short prose.
         """
-        params = {
-            "memory_type": memory_type,
-            "name": name,
-            "detail": detail,
-            "confidence": confidence,
-            # Stamped here, not asked of the model: two agents write to one trace, and
-            # the record has to be able to attribute every step. A value the LLM chose
-            # would be a value it could get wrong.
-            "recorded_by": AGENT_IDENTITY,
-        }
-        if step_input:
-            params["step_input"] = step_input
-        if step_output:
-            params["step_output"] = step_output
         try:
-            backend_url = _get_backend_url()
-            response = requests.post(
-                f"{backend_url}/api/audit/traces/{trace_id}/steps", params=params, timeout=5
+            trace = da.audit().append_step(
+                trace_id=trace_id,
+                memory_type=memory_type,
+                name=name,
+                detail=detail,
+                confidence=confidence,
+                step_input=step_input or None,
+                step_output=step_output or None,
+                # Stamped here, not asked of the model: two agents write to one trace, and
+                # the record has to be able to attribute every step. A value the LLM chose
+                # would be a value it could get wrong.
+                recorded_by=AGENT_IDENTITY,
             )
-            if response.status_code == 404:
-                return json.dumps({"error": f"Trace {trace_id} not found"})
-            if response.status_code == 400:
-                try:
-                    detail_msg = response.json().get("detail", "invalid request")
-                except ValueError:
-                    detail_msg = "invalid request"
-                return json.dumps({"error": f"Step not appended: {detail_msg}"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to append reasoning step: {str(e)}"})
+            return da.respond(AuditTrace, trace)
+        except LookupError:
+            return da.error(f"Trace {trace_id} not found")
+        except ValueError as e:
+            return da.refused(f"Step not appended: {str(e)}")
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to append reasoning step: {str(e)}")
 
     # =========================================================================
     # 6. Case routing & closure
+    #
+    # Every `ValueError` below is a bounded-authority refusal, not a malformed
+    # request. Keeping the messages distinct is what stops the agent reading a
+    # refusal as a transient failure and retrying a closure it may not make.
     # =========================================================================
 
     @app.tool(is_local=False)
@@ -665,22 +603,14 @@ def register(app: App) -> None:
             trace_id: Trace business key carrying the recommendation to route.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.post(
-                f"{backend_url}/api/audit/traces/{trace_id}/route", timeout=5
-            )
-            if response.status_code == 404:
-                return json.dumps({"error": f"Trace {trace_id} not found"})
-            if response.status_code == 400:
-                try:
-                    detail = response.json().get("detail", "invalid request")
-                except ValueError:
-                    detail = "invalid request"
-                return json.dumps({"error": f"Cannot route this trace: {detail}"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to route decision: {str(e)}"})
+            result = da.audit().route_decision(trace_id)
+            return da.respond(RoutingDecisionResponse, result)
+        except LookupError:
+            return da.error(f"Trace {trace_id} not found")
+        except ValueError as e:
+            return da.refused(f"Cannot route this trace: {str(e)}")
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to route decision: {str(e)}")
 
     @app.tool(is_local=False)
     def close_administrative_determination(
@@ -707,24 +637,16 @@ def register(app: App) -> None:
             closed_by: System identity closing the case.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.post(
-                f"{backend_url}/api/audit/traces/{trace_id}/close-administrative",
-                params={"reason": reason, "closed_by": closed_by},
-                timeout=5,
+            trace = da.audit().close_administrative(
+                trace_id=trace_id, reason=reason, closed_by=closed_by
             )
-            if response.status_code == 404:
-                return json.dumps({"error": f"Trace {trace_id} not found"})
-            if response.status_code == 400:
-                try:
-                    detail = response.json().get("detail", "closure refused")
-                except ValueError:
-                    detail = "closure refused"
-                return json.dumps({"error": f"Closure refused: {detail}"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to close case: {str(e)}"})
+            return da.respond(AuditTrace, trace)
+        except LookupError:
+            return da.error(f"Trace {trace_id} not found")
+        except ValueError as e:
+            return da.refused(f"Closure refused: {str(e)}")
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to close case: {str(e)}")
 
     @app.tool(is_local=False)
     def close_authorization(
@@ -745,24 +667,14 @@ def register(app: App) -> None:
             closed_by: System identity closing the case.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.post(
-                f"{backend_url}/api/audit/traces/{trace_id}/close-authorization",
-                params={"closed_by": closed_by},
-                timeout=5,
-            )
-            if response.status_code == 404:
-                return json.dumps({"error": f"Trace {trace_id} not found"})
-            if response.status_code == 400:
-                try:
-                    detail = response.json().get("detail", "closure refused")
-                except ValueError:
-                    detail = "closure refused"
-                return json.dumps({"error": f"Closure refused: {detail}"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to close authorization: {str(e)}"})
+            trace = da.audit().close_authorization(trace_id=trace_id, closed_by=closed_by)
+            return da.respond(AuditTrace, trace)
+        except LookupError:
+            return da.error(f"Trace {trace_id} not found")
+        except ValueError as e:
+            return da.refused(f"Closure refused: {str(e)}")
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to close authorization: {str(e)}")
 
     @app.tool(is_local=False)
     def escalate_to_human(
@@ -795,28 +707,20 @@ def register(app: App) -> None:
                 documented trial shows, and the recommendation with its confidence.
             final_decision_maker: Role responsible for closing the case.
         """
-        params = {"reason": reason, "final_decision_maker": final_decision_maker}
-        if case_brief:
-            params["case_brief"] = case_brief
         try:
-            backend_url = _get_backend_url()
-            response = requests.post(
-                f"{backend_url}/api/audit/traces/{trace_id}/escalate",
-                params=params,
-                timeout=5,
+            trace = da.audit().escalate(
+                trace_id=trace_id,
+                reason=reason,
+                case_brief=case_brief or None,
+                final_decision_maker=final_decision_maker,
             )
-            if response.status_code == 404:
-                return json.dumps({"error": f"Trace {trace_id} not found"})
-            if response.status_code == 400:
-                try:
-                    detail = response.json().get("detail", "invalid request")
-                except ValueError:
-                    detail = "invalid request"
-                return json.dumps({"error": f"Escalation rejected: {detail}"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to escalate case: {str(e)}"})
+            return da.respond(AuditTrace, trace)
+        except LookupError:
+            return da.error(f"Trace {trace_id} not found")
+        except ValueError as e:
+            return da.refused(f"Escalation rejected: {str(e)}")
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to escalate case: {str(e)}")
 
     # =========================================================================
     # 7. Member state updates
@@ -846,32 +750,20 @@ def register(app: App) -> None:
             status: pending, in_progress or resolved.
             linked_audit_trace_id: Trace opened for this action.
         """
-        params = {"action_id": action_id, "status": status}
-        if linked_audit_trace_id:
-            params["linked_audit_trace_id"] = linked_audit_trace_id
         try:
-            backend_url = _get_backend_url()
-            response = requests.post(
-                f"{backend_url}/api/members/{member_id}/pending-action",
-                params=params,
-                timeout=5,
+            result = da.members().update_pending_action(
+                member_id=member_id,
+                action_id=action_id,
+                status=status,
+                linked_audit_trace_id=linked_audit_trace_id or None,
             )
-            if response.status_code == 404:
-                try:
-                    detail = response.json().get("detail", "not found")
-                except ValueError:
-                    detail = "route not found (is the backend up to date?)"
-                return json.dumps({"error": f"pending-action 404: {detail}"})
-            if response.status_code == 400:
-                try:
-                    detail = response.json().get("detail", "invalid request")
-                except ValueError:
-                    detail = "invalid request"
-                return json.dumps({"error": f"Pending action not updated: {detail}"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to update pending action: {str(e)}"})
+            return da.respond(PendingActionUpdateResponse, result)
+        except LookupError as e:
+            return da.error(f"Pending action not found: {str(e)}")
+        except ValueError as e:
+            return da.refused(f"Pending action not updated: {str(e)}")
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to update pending action: {str(e)}")
 
     @app.tool(is_local=False)
     def update_member_summary(
@@ -893,24 +785,14 @@ def register(app: App) -> None:
             open_authorization_delta: +1 when a case opens, -1 when one closes.
         """
         try:
-            backend_url = _get_backend_url()
-            response = requests.post(
-                f"{backend_url}/api/members/{member_id}/summary",
-                params={
-                    "last_authorization_status": last_authorization_status,
-                    "open_authorization_delta": open_authorization_delta,
-                },
-                timeout=5,
+            # `open_authorization_delta` is accepted and deliberately ignored: the
+            # counts are derived from the member's decision traces, not incremented.
+            # Two code paths write these fields, and a delta assumes a single writer.
+            result = da.members().recompute_summary(
+                member_id, last_authorization_status=last_authorization_status
             )
-            if response.status_code == 404:
-                return json.dumps({"error": f"Member {member_id} not found"})
-            if response.status_code == 400:
-                try:
-                    detail = response.json().get("detail", "invalid request")
-                except ValueError:
-                    detail = "invalid request"
-                return json.dumps({"error": f"Summary not updated: {detail}"})
-            response.raise_for_status()
-            return json.dumps(response.json())
-        except requests.RequestException as e:
-            return json.dumps({"error": f"Failed to update member summary: {str(e)}"})
+            if not result:
+                return da.error(f"Member {member_id} not found")
+            return da.respond(MemberSummaryResponse, result)
+        except (PyMongoError, RuntimeError) as e:
+            return da.error(f"Failed to update member summary: {str(e)}")

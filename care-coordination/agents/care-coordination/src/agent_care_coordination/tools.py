@@ -103,7 +103,7 @@ def register(app: App) -> None:
             if not context:
                 return da.error(f"Member {member_id} not found")
             return da.respond(MemberClinicalContext, context)
-        except PyMongoError as e:
+        except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to retrieve member context: {str(e)}")
 
     @app.tool(is_local=False)
@@ -133,7 +133,7 @@ def register(app: App) -> None:
             if result is None:
                 return da.error(f"Member {member_id} not found")
             return da.respond(OpenCaseResponse, result)
-        except PyMongoError as e:
+        except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to retrieve open case: {str(e)}")
 
     @app.tool(is_local=False)
@@ -164,7 +164,7 @@ def register(app: App) -> None:
             if result is None:
                 return da.error(f"Member {member_id} not found")
             return da.respond(ConceptMatchResponse, result)
-        except PyMongoError as e:
+        except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to match clinical concept: {str(e)}")
 
     @app.tool(is_local=False)
@@ -200,7 +200,7 @@ def register(app: App) -> None:
                     "confidence_threshold": guideline.get("confidence_threshold"),
                 },
             )
-        except PyMongoError as e:
+        except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to retrieve guideline: {str(e)}")
 
     @app.tool(is_local=False)
@@ -230,7 +230,7 @@ def register(app: App) -> None:
             if result is None:
                 return da.error(f"No guideline found for condition {condition_code}")
             return da.respond(ClassificationResponse, result)
-        except PyMongoError as e:
+        except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to classify treatment: {str(e)}")
 
     @app.tool(is_local=False)
@@ -269,7 +269,7 @@ def register(app: App) -> None:
             if result is None:
                 return da.error(f"No guideline found for condition {condition_code}")
             return da.respond(StepTherapyResponse, result)
-        except PyMongoError as e:
+        except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to evaluate step therapy: {str(e)}")
 
     @app.tool(is_local=False)
@@ -318,7 +318,7 @@ def register(app: App) -> None:
             if result is None:
                 return da.error(f"Member {member_id} not found")
             return da.respond(TrialHistoryResponse, result)
-        except PyMongoError as e:
+        except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to review trial history: {str(e)}")
 
     @app.tool(is_local=False)
@@ -344,7 +344,7 @@ def register(app: App) -> None:
             # nothing.
             result = da.claims().detect_refill_gaps(member_id, drug=drug or None)
             return da.respond(RefillGapsResponse, result)
-        except PyMongoError as e:
+        except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to detect refill gaps: {str(e)}")
 
     @app.tool(is_local=False)
@@ -393,7 +393,7 @@ def register(app: App) -> None:
             if not member:
                 return da.error(f"Member {member_id} not found")
             return da.respond(Member, member)
-        except PyMongoError as e:
+        except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to resolve refill gap: {str(e)}")
 
     @app.tool(is_local=False)
@@ -446,7 +446,7 @@ def register(app: App) -> None:
             if result is None:
                 return da.error(f"No guideline found for condition {condition_code}")
             return da.respond(RecommendationResponse, result)
-        except PyMongoError as e:
+        except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to compute recommendation: {str(e)}")
 
     @app.tool(is_local=False)
@@ -498,7 +498,7 @@ def register(app: App) -> None:
             return da.error(f"Trace {trace_id} not found")
         except ValueError as e:
             return da.error(f"Step not recorded: {str(e)}")
-        except PyMongoError as e:
+        except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to record reasoning step: {str(e)}")
 
     @app.tool(is_local=False)
@@ -534,7 +534,7 @@ def register(app: App) -> None:
             return da.error(f"Trace {trace_id} not found")
         except ValueError as e:
             return da.error(f"Recommendation not recorded: {str(e)}")
-        except PyMongoError as e:
+        except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to record recommendation: {str(e)}")
 
     @app.tool(is_local=False)
@@ -556,5 +556,5 @@ def register(app: App) -> None:
                 MemberTracesResponse,
                 {"member_id": member_id, "trace_count": len(traces), "traces": traces},
             )
-        except PyMongoError as e:
+        except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to retrieve authorizations: {str(e)}")

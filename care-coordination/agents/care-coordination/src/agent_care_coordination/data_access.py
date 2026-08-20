@@ -44,6 +44,15 @@ def _connector():
     only scopes its own store database (`mdb_store`, see
     `runner_shared.db_config`). Unset, `MongoDBConnector` would do
     `client[None]` and fail deep in pymongo on the first query rather than here.
+
+    The `RuntimeError` is raised lazily, on the first service call rather than at
+    import, so a misconfigured tool pod still starts and reports the problem through
+    the tool result. Every tool therefore catches `RuntimeError` alongside
+    `PyMongoError`: raising out of a tool body would abort the turn and lose this
+    message, which is the one thing that makes the misconfiguration diagnosable.
+
+    `lru_cache` does not memoize exceptions, so a later call retries once the
+    variable is present.
     """
     if not os.environ.get("DATABASE_NAME"):
         raise RuntimeError(
