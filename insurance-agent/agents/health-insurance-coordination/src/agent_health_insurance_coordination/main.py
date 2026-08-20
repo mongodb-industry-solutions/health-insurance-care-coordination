@@ -112,14 +112,26 @@ def build_agent(llm: Optional[BaseChatModel] = None) -> CompiledStateGraph:
         `END` is a sentinel rather than a node, so this exists to give the terminal
         branch somewhere to run. It changes no state.
 
-        Safe outside an agent run — the SDK answers UNAVAILABLE rather than raising,
-        so local scripts and tests are unaffected.
+        Two separate reasons this must not raise. Inside an agent run with no session
+        to finish — a local script, a tool pod — the SDK answers UNAVAILABLE. And
+        `finish_session` only exists in newer magenta_sdklanggraph builds: this app is
+        pinned from git with no version, so a re-lock can move it either way, and the
+        care-coordination agent is already on a build without it. Hence the lookup
+        rather than a direct call. Warn rather than fail: an old SDK should cost the
+        early release, not the run.
 
         If this workflow ever passes `session_id` to continue a conversation across
         turns, this node has to go: finishing the session releases exactly the pods a
         continued turn would need.
         """
-        logger.info("session finish requested: %s", app.finish_session())
+        finish = getattr(app, "finish_session", None)
+        if finish is None:
+            logger.warning(
+                "app.finish_session() unavailable in this magenta_sdklanggraph build; "
+                "session compute will be held until the idle reservation expires."
+            )
+            return {}
+        logger.info("session finish requested: %s", finish())
         return {}
 
     builder = StateGraph(AgentState)
