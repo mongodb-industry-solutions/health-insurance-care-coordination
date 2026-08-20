@@ -9,6 +9,9 @@ framework: langgraph
 config:
     provider: openai
     model: gpt-5.4
+network:
+  atlas_clusters:
+    - ist-shared.n0kts.mongodb.net
 features:
     memory: true
 # Declare which secrets each workload may access. Platform-required secrets
@@ -16,13 +19,18 @@ features:
 # invoke_llm is a reserved tool name: the platform runs model calls in a tool
 # pod, so the LLM provider key must also be declared under tools.invoke_llm.
 # Replace the placeholder with your provider's key name (e.g. OPENAI_API_KEY).
+# MONGODB_URI is injected, but DATABASE_NAME is not: the platform only scopes its
+# own store DB (mdb_store, via runner_shared.db_config). Application collections
+# live in a database this app names itself, so the tool pods have to be told which.
+# BACKEND_URL is gone — the tools read MongoDB in-process, there is no backend call.
 required_secrets:
     aer:
         - OPENAI_API_KEY
         - OPENAI_BASE_URL
-        - BACKEND_URL
+        - DATABASE_NAME
     tools:
+        "*":
+            - DATABASE_NAME
         invoke_llm:
             - OPENAI_API_KEY
             - OPENAI_BASE_URL
-            - BACKEND_URL

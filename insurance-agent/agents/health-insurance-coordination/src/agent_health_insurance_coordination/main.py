@@ -4,10 +4,17 @@ The Insurance Agent's half of the prior-authorization process: it opens the case
 runs the two administrative gates, and — once a clinical recommendation exists —
 routes and closes it under bounded authority.
 
-The agent holds no database driver and no models shared with the backend. Every
-domain read and write is an HTTP call to the FastAPI service (`BACKEND_URL`),
-which owns the data in `health_insurance_agent` and enforces the authority rules
-deterministically, server-side.
+Every domain read and write goes straight to MongoDB in-process, through the
+vendored data layer in `data/` (services and repositories lifted from the backend,
+minus its HTTP routes). `data_access` holds the service instances and reproduces
+the response shaping the FastAPI layer used to do. The authority rules still live
+in that service code and are still applied deterministically — the closure and
+claim-status guardrails refuse by raising, and the tools surface those refusals as
+refusals. What went away is the network hop, not the enforcement.
+
+Requires `MONGODB_URI` (platform-injected) and `DATABASE_NAME` (declared in
+agent.yaml); the data lives in `health_insurance_agent`, which is separate from
+the platform's own store database.
 
 The platform launches this code in supported runtime roles:
     RUNNER_MODE=aer            -> Full LangGraph execution

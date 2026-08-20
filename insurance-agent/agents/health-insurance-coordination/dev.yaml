@@ -16,6 +16,11 @@ services:
   #   port: 8002  # Tool execution runtime.
   # memory-server:
   #   port: 8081  # Long-term memory service.
-  # mongodb:
-  #   local: true  # Default true. Set false to use a remote Atlas cluster in local dev.
+  # The tools read the application database (`health_insurance_agent`) directly, so
+  # local dev has to point at the same remote Atlas cluster the backend and the
+  # Care Coordination agent use. Left at the `local: true` default, the platform
+  # starts an empty Atlas container and injects it as MONGODB_URI — every lookup
+  # then returns "not found" and a case stops at Step 0 with nothing recorded.
+  mongodb:
+    local: false  # Default true. Set false to use a remote Atlas cluster in local dev.
   #   port: 27017  # Local Atlas host port; ignored when local is false.
