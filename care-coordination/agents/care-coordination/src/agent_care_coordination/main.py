@@ -98,12 +98,47 @@ def build_agent(llm: Optional[BaseChatModel] = None) -> CompiledStateGraph:
         last = state["messages"][-1]
         return "tools" if getattr(last, "tool_calls", None) else "end"
 
+    def finish_node(state: AgentState) -> dict:
+        """Release this session's compute instead of holding it to the idle TTL.
+
+        This agent takes one turn per case — Steps 3-7, the clinical assessment — and
+        is never resumed: the insurance agent's routing turn is a separate session on
+        a separate app. Holding the AER and tool pods after the recommendation is
+        recorded only competes for capacity with the turns either side of it.
+
+        `END` is a sentinel rather than a node, so this exists to give the terminal
+        branch somewhere to run. It changes no state.
+
+        Safe outside an agent run — the SDK answers UNAVAILABLE rather than raising,
+        so local scripts and tests are unaffected.
+
+        If this workflow ever passes `session_id` to continue a conversation across
+        turns, this node has to go: finishing the session releases exactly the pods a
+        continued turn would need.
+
+        `finish_session` is only present in newer magenta_sdklanggraph builds, and
+        this app's lock predates it — hence the lookup rather than a direct call.
+        Warn rather than fail: an old SDK should cost the early release, not the run.
+        Re-lock the SDK and the release starts happening with no code change.
+        """
+        finish = getattr(app, "finish_session", None)
+        if finish is None:
+            logger.warning(
+                "app.finish_session() unavailable in this magenta_sdklanggraph build; "
+                "session compute will be held until the idle reservation expires."
+            )
+            return {}
+        logger.info("session finish requested: %s", finish())
+        return {}
+
     builder = StateGraph(AgentState)
     builder.add_node("agent", agent_node)
     builder.add_node("tools", ToolNode(tools))
+    builder.add_node("finish", finish_node)
     builder.add_edge(START, "agent")
-    builder.add_conditional_edges("agent", should_continue, {"tools": "tools", "end": END})
+    builder.add_conditional_edges("agent", should_continue, {"tools": "tools", "end": "finish"})
     builder.add_edge("tools", "agent")
+    builder.add_edge("finish", END)
 
     # The checkpointer needs MongoDB. If it is unreachable the agent should still
     # answer single-turn requests rather than fail to build, which would turn
