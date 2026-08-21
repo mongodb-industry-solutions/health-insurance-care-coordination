@@ -4,6 +4,10 @@ Served at the root (`/seed`, `/reset-demo`, `/members/{member_id}/reset-demo`) r
 under the `/api` prefix the product domains use — short to type during a demo, and
 the absence of the prefix is itself a marker that these are not product endpoints.
 
+`main.py` mounts this router a second time under `/api/admin` for the frontend's
+"Reset demo" button: the browser reaches the backend only through the Next.js
+`/api/*` proxy, which would not forward a root path. Same handlers, two paths.
+
 They write and delete data, including the audit rows this is the only code allowed
 to remove, and `/reset-demo` discards every member's state. Lock them down or drop
 the router entirely for anything but a demo.
