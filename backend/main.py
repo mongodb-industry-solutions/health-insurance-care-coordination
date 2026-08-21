@@ -68,6 +68,10 @@ app.include_router(audit_router)
 app.include_router(plans_router)
 app.include_router(notifications_router)
 app.include_router(admin_router)
+# Same admin handlers again under `/api/admin`. The root mount stays for curl and
+# the seed CLI, but the browser can only reach the backend through the frontend's
+# `/api/*` proxy, so the "Reset demo" button needs a prefixed path to call.
+app.include_router(admin_router, prefix="/api/admin")
 # Frontend-facing workflow entry points (Start Process, progress, human closure).
 app.include_router(authorization_router)
 # Free-form chat with the same agents, independent of the authorization workflow.
