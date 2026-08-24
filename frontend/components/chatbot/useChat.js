@@ -3,6 +3,28 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchChatAgents, streamChatMessage } from "@/lib/api/chat";
 
 /**
+ * A unique id for one message in a transcript.
+ *
+ * `crypto.randomUUID` is only defined in a secure context — HTTPS, or the
+ * `localhost` exemption. Served over plain HTTP on any other origin, as the E2E
+ * suite reaches the app (`http://health-insurance-frontend-web-app:80`), it is
+ * `undefined`, and calling it threw a `TypeError` out of the click handler before
+ * a message was ever appended: the assistant looked like it had ignored the
+ * question, with nothing in the UI or the network log to say why.
+ *
+ * These ids never leave the browser — they are React keys and the handle
+ * `patchMessage` uses to find a streaming reply — so collision-resistance within
+ * one session is the whole requirement and the fallback meets it. The random
+ * suffix is what separates two ids minted in the same millisecond.
+ *
+ * In a secure context the optional call succeeds and `??` never evaluates the
+ * fallback, so behaviour there is unchanged.
+ */
+const newMessageId = () =>
+  globalThis.crypto?.randomUUID?.() ??
+  `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+/**
  * Owns the conversation: one independent thread per agent, plus the send/stream
  * lifecycle.
  *
@@ -126,8 +148,8 @@ export function useChat({ memberId, memberName } = {}) {
 
       // Random ids, not timestamps: two agents answering in the same millisecond would
       // collide, and a patch meant for one reply would land on the other.
-      const userId = crypto.randomUUID();
-      const replyId = crypto.randomUUID();
+      const userId = newMessageId();
+      const replyId = newMessageId();
 
       setAllMessages((current) => [
         ...current,
