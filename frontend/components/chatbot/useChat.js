@@ -3,6 +3,33 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchChatAgents, streamChatMessage } from "@/lib/api/chat";
 
 /**
+ * A unique id for one message in a transcript.
+ *
+ * `crypto.randomUUID` is only defined in a secure context — HTTPS, or the
+ * `localhost` exemption. Served over plain HTTP on any other origin, as the E2E
+ * suite reaches the app (`http://health-insurance-frontend-web-app:80`), it is
+ * `undefined`, and calling it threw a `TypeError` out of the click handler before
+ * a message was ever appended: the assistant looked like it had ignored the
+ * question, with nothing in the UI or the network log to say why.
+ *
+ * These ids never leave the browser — they are React keys and the handle
+ * `patchMessage` uses to find a streaming reply — so uniqueness within one page
+ * session is the entire requirement; nothing here needs to be unguessable.
+ *
+ * The fallback is therefore a counter rather than randomness, which makes that
+ * uniqueness exact instead of probable. A random suffix could not promise it:
+ * `Math.random().toString(36)` is variable-length, and returns "0" often enough
+ * to matter over a long session, which would collapse two ids minted in the same
+ * millisecond into one and let a patch land on the wrong message.
+ *
+ * In a secure context the optional call succeeds and `??` never evaluates the
+ * fallback, so behaviour there is unchanged.
+ */
+let messageSeq = 0;
+const newMessageId = () =>
+  globalThis.crypto?.randomUUID?.() ?? `msg-${(messageSeq += 1)}`;
+
+/**
  * Owns the conversation: one independent thread per agent, plus the send/stream
  * lifecycle.
  *
@@ -124,10 +151,10 @@ export function useChat({ memberId, memberName } = {}) {
 
       const sessionId = sessionsRef.current[agent.id] ?? null;
 
-      // Random ids, not timestamps: two agents answering in the same millisecond would
-      // collide, and a patch meant for one reply would land on the other.
-      const userId = crypto.randomUUID();
-      const replyId = crypto.randomUUID();
+      // Distinct ids, not timestamps: two agents answering in the same millisecond
+      // would collide, and a patch meant for one reply would land on the other.
+      const userId = newMessageId();
+      const replyId = newMessageId();
 
       setAllMessages((current) => [
         ...current,
