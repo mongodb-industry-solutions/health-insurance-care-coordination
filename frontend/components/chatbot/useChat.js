@@ -13,16 +13,21 @@ import { fetchChatAgents, streamChatMessage } from "@/lib/api/chat";
  * question, with nothing in the UI or the network log to say why.
  *
  * These ids never leave the browser — they are React keys and the handle
- * `patchMessage` uses to find a streaming reply — so collision-resistance within
- * one session is the whole requirement and the fallback meets it. The random
- * suffix is what separates two ids minted in the same millisecond.
+ * `patchMessage` uses to find a streaming reply — so uniqueness within one page
+ * session is the entire requirement; nothing here needs to be unguessable.
+ *
+ * The fallback is therefore a counter rather than randomness, which makes that
+ * uniqueness exact instead of probable. A random suffix could not promise it:
+ * `Math.random().toString(36)` is variable-length, and returns "0" often enough
+ * to matter over a long session, which would collapse two ids minted in the same
+ * millisecond into one and let a patch land on the wrong message.
  *
  * In a secure context the optional call succeeds and `??` never evaluates the
  * fallback, so behaviour there is unchanged.
  */
+let messageSeq = 0;
 const newMessageId = () =>
-  globalThis.crypto?.randomUUID?.() ??
-  `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  globalThis.crypto?.randomUUID?.() ?? `msg-${(messageSeq += 1)}`;
 
 /**
  * Owns the conversation: one independent thread per agent, plus the send/stream
@@ -146,8 +151,8 @@ export function useChat({ memberId, memberName } = {}) {
 
       const sessionId = sessionsRef.current[agent.id] ?? null;
 
-      // Random ids, not timestamps: two agents answering in the same millisecond would
-      // collide, and a patch meant for one reply would land on the other.
+      // Distinct ids, not timestamps: two agents answering in the same millisecond
+      // would collide, and a patch meant for one reply would land on the other.
       const userId = newMessageId();
       const replyId = newMessageId();
 
