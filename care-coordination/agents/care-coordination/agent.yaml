@@ -8,7 +8,7 @@ entrypoint: agent_care_coordination.main:app
 framework: langgraph
 config:
     provider: openai
-    model: gpt-5.4
+    model: gpt-5.4-mini
 network:
   atlas_clusters:
     - ist-shared.n0kts.mongodb.net
