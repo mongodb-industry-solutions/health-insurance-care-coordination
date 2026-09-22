@@ -26,7 +26,7 @@ def build_llm(
         model: Model name override. Each builder has its own default.
         temperature: Sampling temperature; keep at 0 for deterministic decisions.
     """
-    configured_provider = (provider or "").strip().lower()
+    configured_provider = os.environ.get("PROVIDER", "").strip().lower()
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
     openai_key = os.environ.get("OPENAI_API_KEY", "")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -38,7 +38,7 @@ def build_llm(
 
         return cast(Any, ChatGoogleGenerativeAI)(
             api_key=gemini_key,
-            model=model or "gemini-2.5-flash",
+            model= os.environ.get("MODEL", ""),
             temperature=temperature,
         )
 
@@ -47,7 +47,7 @@ def build_llm(
 
         kwargs: dict[str, Any] = {
             "api_key": openai_key,
-            "model": model or "gpt-5.4-mini",
+            "model": os.environ.get("MODEL", ""),
             "temperature": temperature,
         }
         if openai_base_url:
@@ -63,7 +63,7 @@ def build_llm(
 
         kwargs: dict[str, Any] = {
             "api_key": anthropic_key,
-            "model_name": model or "claude-sonnet-4-6",
+            "model_name": os.environ.get("MODEL", ""),
             "temperature": temperature,
         }
         if anthropic_base_url:

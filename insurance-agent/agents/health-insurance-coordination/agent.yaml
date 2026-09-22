@@ -1,40 +1,53 @@
 # Human-readable app slug used by Agentic Platform tooling.
+
 # `agentic create` should rewrite this when generating a new app from the template.
+
 name: health-insurance-coordination
 # Python import path to the Magenta SDK App instance.
+
 # Format: <module path>:<variable name>. This template exposes `app` from
+
 # src/insurance_agent/main.py.
 entrypoint: agent_health_insurance_coordination.main:app
 framework: langgraph
-config:
-    provider: openai
-    model: gpt-5.4
 network:
+  egress_mode: allow_list
   atlas_clusters:
     - ist-shared.n0kts.mongodb.net
-#   egress:
-#     - fqdn: grove-gateway-prod.azure-api.net   # or api.anthropic.com if you call Anthropic directly
-#       ports: [443]
+  egress:
+    # Without this the sandbox can reach Atlas but not the model gateway, and
+    # every LLM call fails with "Connection error".
+    - fqdn: grove-gateway-prod.azure-api.net
+      ports: [443]
 
-# features:
-#     guardrails: false
-#     memory: false
-# Declare which secrets each workload may access. Platform-required secrets
-# (MONGODB_URI, VOYAGE_API_KEY) are always injected and do not need to be listed.
-
-
-# MONGODB_URI is injected, but DATABASE_NAME is not: the platform only scopes its
-# own store DB (mdb_store, via runner_shared.db_config). Application collections
-# live in a database this app names itself, so the tool pods have to be told which.
-# BACKEND_URL is gone — the tools read MongoDB in-process, there is no backend call.
-required_secrets:
-    aer:
-        - OPENAI_API_KEY
-        - OPENAI_BASE_URL
-        - DATABASE_NAME
+sandboxes:
+  agent:
+    secrets: ['*']
+  tool:
+    secrets: ['*']
     tools:
-        "*":
-            - DATABASE_NAME
-        invoke_llm:
-            - OPENAI_API_KEY
-            - OPENAI_BASE_URL
+      - get_current_date
+      - save_user_info
+      - recall_user_info
+      - get_member_by_id
+      - get_policy_by_id
+      - get_plan_by_id
+      - get_audit_trace
+      - list_all_members
+      - list_all_policies
+      - list_all_plans
+      - list_all_claims
+      - list_all_audit_traces
+      - list_pending_authorizations
+      - verify_eligibility_on_date
+      - check_treatment_coverage
+      - create_claim
+      - update_claim_status
+      - create_audit_trace
+      - append_reasoning_step
+      - route_decision
+      - close_administrative_determination
+      - close_authorization
+      - escalate_to_human
+      - update_pending_action
+      - update_member_summary

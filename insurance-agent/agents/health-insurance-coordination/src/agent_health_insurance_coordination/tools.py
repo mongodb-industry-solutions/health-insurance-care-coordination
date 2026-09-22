@@ -27,7 +27,9 @@ import json
 from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from magenta_sdklanggraph import App
+# from magenta_sdklanggraph import App
+from agent_engine_sdk_langgraph import App
+
 from pymongo.errors import PyMongoError
 
 from . import data_access as da
@@ -53,7 +55,7 @@ def register(app: App) -> None:
     # Scaffold / platform tools
     # =========================================================================
 
-    @app.tool(is_local=False)
+    @app.tool()
     def get_current_date(timezone_name: str = "UTC") -> str:
         """Return today's date in ISO 8601 format for an IANA timezone.
 
@@ -74,7 +76,7 @@ def register(app: App) -> None:
             )
         return json.dumps({"date": datetime.now(timezone).date().isoformat()})
 
-    @app.tool(is_local=False)
+    @app.tool()
     def save_user_info(info_key: str, info_value: str) -> str:
         """Save a piece of information about the user to long-term memory.
 
@@ -94,7 +96,7 @@ def register(app: App) -> None:
             return json.dumps({"status": "saved", "info_key": info_key})
         return json.dumps({"status": "error", "error": "Memory is not enabled"})
 
-    @app.tool(is_local=False)
+    @app.tool()
     def recall_user_info() -> str:
         """Recall stored information about the current user from long-term memory."""
         user_id = app.get_current_user_id()
@@ -110,7 +112,7 @@ def register(app: App) -> None:
     # 1. Single-record lookup
     # =========================================================================
 
-    @app.tool(is_local=False)
+    @app.tool()
     def get_member_by_id(member_id: str) -> str:
         """Retrieve one member's full record by their memberId.
 
@@ -132,7 +134,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to retrieve member: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def get_policy_by_id(policy_id: str) -> str:
         """Retrieve one policy by its policyId.
 
@@ -147,7 +149,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to retrieve policy: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def get_plan_by_id(plan_id: str) -> str:
         """Retrieve one plan by its planId. This is the record the treatment-coverage check runs against.
 
@@ -162,7 +164,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to retrieve plan: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def get_audit_trace(trace_id: str) -> str:
         """Retrieve one decision trace by its traceId.
 
@@ -190,7 +192,7 @@ def register(app: App) -> None:
     # the routes and is part of the shape the model expects.
     # =========================================================================
 
-    @app.tool(is_local=False)
+    @app.tool()
     def list_all_members() -> str:
         """Return every member record in the system.
 
@@ -203,7 +205,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to list members: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def list_all_policies() -> str:
         """Return every policy record in the system.
 
@@ -218,7 +220,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to list policies: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def list_all_plans() -> str:
         """Return every plan record in the system, with their treatment catalogs.
 
@@ -231,7 +233,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to list plans: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def list_all_claims() -> str:
         """Return every claim record in the system.
 
@@ -245,7 +247,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to list claims: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def list_all_audit_traces() -> str:
         """Return every decision trace in the system.
 
@@ -259,7 +261,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to list traces: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def list_pending_authorizations() -> str:
         """Return every member with a pending action still open — the work queue.
 
@@ -280,7 +282,7 @@ def register(app: App) -> None:
     # 3. Eligibility & coverage checks
     # =========================================================================
 
-    @app.tool(is_local=False)
+    @app.tool()
     def verify_eligibility_on_date(policy_id: str, service_date: str = "") -> str:
         """Step 1 — the first administrative gate: was coverage active on the service date?
 
@@ -313,7 +315,7 @@ def register(app: App) -> None:
             return da.error(f"Policy {policy_id} not found")
         return da.respond(EligibilityCheckResponse, result)
 
-    @app.tool(is_local=False)
+    @app.tool()
     def check_treatment_coverage(
         plan_id: str, condition: str, treatment_code: str = "", drug: str = ""
     ) -> str:
@@ -371,7 +373,7 @@ def register(app: App) -> None:
     # 4. Claim management
     # =========================================================================
 
-    @app.tool(is_local=False)
+    @app.tool()
     def create_claim(
         member_id: str,
         procedure_code: str,
@@ -422,7 +424,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to create claim: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def update_claim_status(
         claim_id: str,
         status: str,
@@ -471,7 +473,7 @@ def register(app: App) -> None:
     # 5. Audit trace management
     # =========================================================================
 
-    @app.tool(is_local=False)
+    @app.tool()
     def create_audit_trace(
         subject_ref: str,
         decision_type: str = "PRIOR_AUTHORIZATION",
@@ -519,7 +521,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to create trace: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def append_reasoning_step(
         trace_id: str,
         memory_type: str,
@@ -580,7 +582,7 @@ def register(app: App) -> None:
     # refusal as a transient failure and retrying a closure it may not make.
     # =========================================================================
 
-    @app.tool(is_local=False)
+    @app.tool()
     def route_decision(trace_id: str) -> str:
         """Step 8 — the bounded-authority checkpoint. Call this before any closure.
 
@@ -612,7 +614,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to route decision: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def close_administrative_determination(
         trace_id: str,
         reason: str,
@@ -648,7 +650,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to close case: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def close_authorization(
         trace_id: str,
         closed_by: str = "system:insurance_agent",
@@ -676,7 +678,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to close authorization: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def escalate_to_human(
         trace_id: str,
         reason: str,
@@ -726,7 +728,7 @@ def register(app: App) -> None:
     # 7. Member state updates
     # =========================================================================
 
-    @app.tool(is_local=False)
+    @app.tool()
     def update_pending_action(
         member_id: str,
         action_id: str,
@@ -765,7 +767,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to update pending action: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def update_member_summary(
         member_id: str,
         last_authorization_status: str,
