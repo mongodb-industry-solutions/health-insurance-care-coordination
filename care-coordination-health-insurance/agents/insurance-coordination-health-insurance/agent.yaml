@@ -26,6 +26,28 @@ sandboxes:
             - get_current_date
             - save_user_info
             - recall_user_info
+            - get_member_by_id
+            - get_policy_by_id
+            - get_plan_by_id
+            - get_audit_trace
+            - find_open_case
+            - list_all_members
+            - list_all_policies
+            - list_all_plans
+            - list_all_claims
+            - list_all_audit_traces
+            - verify_eligibility_on_date
+            - check_treatment_coverage
+            - create_claim
+            - update_claim_status
+            - create_audit_trace
+            - append_reasoning_step
+            - clear_administrative_gates
+            - route_decision
+            - close_administrative_determination
+            - close_authorization
+            - escalate_to_human
+            - update_member_summary
 version: 0.1.0
 network:
     egress:

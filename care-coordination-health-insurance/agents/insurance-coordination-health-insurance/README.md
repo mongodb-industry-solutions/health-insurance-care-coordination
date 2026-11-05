@@ -1,17 +1,36 @@
 # Insurance Coordination - Health Insurance
 
-A minimal Atlas Agent Engine SDK starter.
+The Insurance Agent's half of the prior-authorization process, on Atlas Agent Engine.
 
-This project was created by `agentengine create` and builds a small daily inspiration assistant named Daily. It can
-look up the current date and remember lightweight user profile details across
-conversations when memory is enabled.
+It opens a case, runs the two administrative gates (eligibility, treatment coverage), clears
+them and hands the case to the care-coordination agent. Once a clinical recommendation is on
+the trace it routes the case and closes it (an administrative denial, or an approval that meets
+the threshold) or escalates it to a medical director.
+
+**Data.** One database, the insurance database (`MONGODB_URI` + `MONGODB_DATABASE`): `members`,
+`policies`, `plans`, `claims`, `audit_log` and `admin_reasoning`. The agent has no access to
+clinical data. The only object it shares with the care agent is the authorization trace, an
+envelope whose `workflow.stage` says whose turn it is. See
+[`data/insurance-data/README.md`](../../../data/insurance-data/README.md) for the schemas and
+the stage machine.
+
+**Opening message.** The platform's opening message is the agent's only source for the request:
+member id, action id, therapy, diagnosis code and display name, the referring physician (id,
+name, specialty), the date of service and, when known, the billed amount.
+
+**Tests** (in-memory MongoDB, no network):
+
+```bash
+uv run --with mongomock python scripts/smoke_test.py      # every tool, against the seed files
+uv run --with mongomock python ../../../tests/handshake_test.py   # both agents, one trace
+```
 
 **Features:** Memory (wired, off by default)
 
 ## What This Template Includes
 
 - A compact LangGraph app built with the SDK
-- Remote tools for date lookup and optional user-memory read/write
+- Remote tools for the administrative workflow and optional user-memory read/write
 - A direct LLM client configured by `agentengine create` or in source
 - `agent.yaml` deploy metadata, with local-dev settings (service ports) in `dev.yaml`
 
