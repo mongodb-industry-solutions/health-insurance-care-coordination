@@ -34,7 +34,8 @@ from langchain_core.messages import SystemMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
-from magenta_sdklanggraph import App
+# from magenta_sdklanggraph import App
+from agent_engine_sdk_langgraph import App
 
 from agent_care_coordination.llm import build_llm
 from agent_care_coordination.state import AgentState

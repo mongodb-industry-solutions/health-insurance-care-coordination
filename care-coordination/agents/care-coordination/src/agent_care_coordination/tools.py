@@ -6,7 +6,8 @@ import json
 from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from magenta_sdklanggraph import App
+# from magenta_sdklanggraph import App
+from agent_engine_sdk_langgraph import App
 from pymongo.errors import PyMongoError
 
 from . import data_access as da
@@ -33,7 +34,7 @@ AGENT_IDENTITY = "system:care_coordination_agent"
 
 
 def register(app: App) -> None:
-    @app.tool(is_local=False)
+    @app.tool()
     def get_current_date(timezone_name: str = "UTC") -> str:
         """Return today's date in ISO 8601 format for an IANA timezone."""
         try:
@@ -47,7 +48,7 @@ def register(app: App) -> None:
             )
         return json.dumps({"date": datetime.now(timezone).date().isoformat()})
 
-    @app.tool(is_local=False)
+    @app.tool()
     def save_user_info(info_key: str, info_value: str) -> str:
         """Save a piece of information about the user to long-term memory.
 
@@ -67,7 +68,7 @@ def register(app: App) -> None:
             return json.dumps({"status": "saved", "info_key": info_key})
         return json.dumps({"status": "error", "error": "Memory is not enabled"})
 
-    @app.tool(is_local=False)
+    @app.tool()
     def recall_user_info() -> str:
         """Recall stored information about the current user from long-term memory."""
         user_id = app.get_current_user_id()
@@ -87,7 +88,7 @@ def register(app: App) -> None:
     # parsing an argument, applying a default — that work is inlined here and noted,
     # because deleting `routes.py` would otherwise have dropped it silently.
 
-    @app.tool(is_local=False)
+    @app.tool()
     def get_member_clinical_context(member_id: str) -> str:
         """Retrieve a member's clinical history and eligibility status.
 
@@ -106,7 +107,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to retrieve member context: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def get_open_case(member_id: str) -> str:
         """Read the member's open case — call this FIRST for any authorization request.
 
@@ -136,7 +137,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to retrieve open case: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def match_clinical_concept(member_id: str, requested_treatment: str) -> str:
         """Step 3 (semantic memory): confirm the requested therapy corresponds to a
         condition already documented on the member's record.
@@ -167,7 +168,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to match clinical concept: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def get_applicable_guideline(condition_code: str, member_id: str) -> str:
         """Retrieve the latest clinical guideline for a condition.
 
@@ -203,7 +204,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to retrieve guideline: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def classify_treatment(condition_code: str, requested_treatment: str) -> str:
         """Step 4 (taxonomic memory): classify the requested treatment by category.
 
@@ -233,7 +234,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to classify treatment: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def evaluate_step_therapy(
         condition_code: str, documented_drug: str, effective_trial_months: float
     ) -> str:
@@ -272,7 +273,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to evaluate step therapy: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def review_trial_history(member_id: str, drug: str) -> str:
         """Step 5 (episodic memory): review the member's trial of the required therapy.
 
@@ -321,7 +322,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to review trial history: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def detect_refill_gaps(member_id: str, drug: str = "") -> str:
         """Scan a member's refill cadence across drugs. Rarely needed in Step 5b.
 
@@ -347,7 +348,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to detect refill gaps: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def resolve_refill_gap(
         member_id: str,
         drug: str,
@@ -396,7 +397,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to resolve refill gap: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def compute_recommendation(
         condition_code: str,
         step_confidences: str,
@@ -449,7 +450,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to compute recommendation: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def record_reasoning_step(
         trace_id: str,
         memory_type: str,
@@ -501,7 +502,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to record reasoning step: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def record_recommendation(
         trace_id: str, decision: str, rationale: str, confidence: float
     ) -> str:
@@ -537,7 +538,7 @@ def register(app: App) -> None:
         except (PyMongoError, RuntimeError) as e:
             return da.error(f"Failed to record recommendation: {str(e)}")
 
-    @app.tool(is_local=False)
+    @app.tool()
     def get_member_authorizations(member_id: str) -> str:
         """Retrieve all prior-authorization decision traces (past and pending) for a member.
 

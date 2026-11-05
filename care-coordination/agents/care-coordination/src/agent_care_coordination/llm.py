@@ -17,7 +17,7 @@ def build_llm(
     temperature: float = 0,
 ) -> BaseChatModel:
     """Create an LLM from agent.yaml hints and environment variables."""
-    configured_provider = (provider or "").strip().lower()
+    configured_provider = os.environ.get("PROVIDER", "").strip().lower()
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
     openai_key = os.environ.get("OPENAI_API_KEY", "")
     openai_base_url = os.environ.get("OPENAI_BASE_URL", "")
@@ -28,7 +28,7 @@ def build_llm(
     def _build_gemini() -> BaseChatModel:
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        model_name = model or "gemini-2.5-flash"
+        model_name = os.environ.get("MODEL", "").strip() or "gemini-2.5-flash"
         logger.info("Using Gemini LLM: %s", model_name)
         kwargs: dict[str, Any] = {
             "api_key": gemini_key,
@@ -43,7 +43,7 @@ def build_llm(
     def _build_openai() -> BaseChatModel:
         from langchain_openai import ChatOpenAI
 
-        model_name = model or "gpt-5.4-mini"
+        model_name = os.environ.get("MODEL", "").strip() or "gpt-5.4-mini"
         logger.info("Using OpenAI LLM: %s", model_name)
         kwargs: dict[str, Any] = {
             "api_key": openai_key,
@@ -66,7 +66,7 @@ def build_llm(
     def _build_anthropic() -> BaseChatModel:
         from langchain_anthropic import ChatAnthropic
 
-        model_name = model or "claude-sonnet-4-6"
+        model_name = os.environ.get("MODEL", "").strip() or "claude-sonnet-4-6"
         logger.info("Using Anthropic LLM: %s", model_name)
         kwargs: dict[str, Any] = {
             "api_key": anthropic_key,
@@ -85,7 +85,7 @@ def build_llm(
     def _build_cerebras() -> BaseChatModel:
         from langchain_cerebras import ChatCerebras
 
-        model_name = model or "qwen-3-235b-a22b-instruct-2507"
+        model_name = os.environ.get("MODEL", "").strip() or "qwen-3-235b-a22b-instruct-2507"
         logger.info("Using Cerebras LLM: %s", model_name)
         cerebras_cls: Any = ChatCerebras
         return cast(
