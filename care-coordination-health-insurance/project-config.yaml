@@ -27,9 +27,9 @@ memory:
   extraction_llm:
     provider: openai
     model: gpt-5.4
-    base_url: https://ai-gateway.corp.mongodb.com/openai/v1
+    base_url: https://grove-gateway-prod.azure-api.net/grove-foundry-prod/openai/v1
     api_key_secret: LLM_API_KEY
-    auth_header: authorization
+    auth_header: api-key
 
   background_extraction:
     # Snapshot promotion
