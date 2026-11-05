@@ -26,6 +26,20 @@ sandboxes:
             - get_current_date
             - save_user_info
             - recall_user_info
+            - list_members
+            - get_member_clinical_context
+            - get_open_case
+            - match_clinical_concept
+            - get_applicable_guideline
+            - classify_treatment
+            - evaluate_step_therapy
+            - review_trial_history
+            - detect_refill_gaps
+            - resolve_refill_gap
+            - compute_recommendation
+            - record_reasoning_step
+            - record_recommendation
+            - get_member_authorizations
 version: 0.1.0
 network:
     egress:

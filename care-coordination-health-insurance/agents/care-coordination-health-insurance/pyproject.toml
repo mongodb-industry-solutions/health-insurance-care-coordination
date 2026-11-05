@@ -16,6 +16,11 @@ dependencies = [
     "langchain-xai>=1.3.0",
     "langchain-google-genai>=2.1.0",
     "langchain-anthropic>=1.4.0",
+    # The tools read MongoDB in-process. Both arrive transitively today (pymongo via
+    # runner-shared[mongodb], pydantic via the SDK), but the data layer imports them
+    # directly, so they are declared here rather than relying on another package's extras.
+    "pymongo>=4.6.0",
+    "pydantic>=2.0.0",
 ]
 
 [project.scripts]
