@@ -19,6 +19,10 @@
   --color-fill: #f0f0f0;
   --color-green-tint: #e3fcf7; /* LeafyGreen green.light3 */
   --color-danger: #db3030; /* LeafyGreen red.base — error text */
+  /* A denial is a decision, not a failure and not a success: its own colour. */
+  --color-orange: #d9650a;
+  --color-orange-dark: #8a3b00;
+  --color-orange-tint: #fff0e0;
 
   /* Layout */
   --page-max-width: 1280px;

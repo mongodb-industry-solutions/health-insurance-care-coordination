@@ -11,21 +11,18 @@ env:
   AWS_REGION: us-east-1
   BACKEND_URL: http://health-insurance-backend-prod-web-app:80
   AGENT_INVOKE_MODE: http
-
-  LOCAL_AGENTIC_DEPLOYMENT: "false"
+  INSURANCE_DATABASE: care-coordination-insurance-agent   
+  CLINICAL_DATABASE: care-coordination-health-agent    
 
 ## Single Pod Containers
 envSecrets:
   # MongoDB Configuration
-  MONGODB_URI: health-insurance-secrets
-  DATABASE_NAME: health-insurance-secrets
-  AGENT_BASE_URL: health-insurance-secrets
-  INSURANCE_AGENT_API_KEY: health-insurance-secrets
-  INSURANCE_AGENT_PROJECT_ID: health-insurance-secrets
-  INSURANCE_AGENT_WORKSPACE_ID: health-insurance-secrets
-  CARE_AGENT_API_KEY: health-insurance-secrets
-  CARE_AGENT_PROJECT_ID: health-insurance-secrets
-  CARE_AGENT_WORKSPACE_ID: health-insurance-secrets
+  MONGODB_URI: health-insurance-secrets                    
+  AAE_CLIENT_ID: health-insurance-secrets                  
+  AAE_CLIENT_SECRET: health-insurance-secrets              
+  AAE_PROJECT_ID: health-insurance-secrets                 
+  INSURANCE_AGENT_WORKSPACE_ID: health-insurance-secrets   
+  CARE_AGENT_WORKSPACE_ID: health-insurance-secrets    
 
 # Add IRSA configuration here, role here gives access to bedrock, s3, aws secrets manager
 serviceAccount:

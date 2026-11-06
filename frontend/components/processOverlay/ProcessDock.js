@@ -1,7 +1,7 @@
 "use client";
 
 import Icon from "@leafygreen-ui/icon";
-import { toOutcome, toOverallProgress } from "@/lib/processPresenter";
+import { outcomeGlyph, toOutcome, toOverallProgress } from "@/lib/processPresenter";
 import styles from "./ProcessDock.module.css";
 
 const RADIUS = 9;
@@ -47,7 +47,7 @@ export default function ProcessDock({ run, title, onOpen, onDismiss }) {
           {settled ? (
             <Icon
               className={styles.ringIcon}
-              glyph={outcome.tone === "success" ? "Checkmark" : "Warning"}
+              glyph={outcomeGlyph(outcome.tone)}
               size={11}
             />
           ) : (

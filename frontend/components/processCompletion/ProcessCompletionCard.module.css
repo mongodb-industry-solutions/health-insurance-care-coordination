@@ -30,6 +30,10 @@
   border-left-color: #b1371f;
 }
 
+.denied {
+  border-left-color: var(--color-orange);
+}
+
 .head {
   display: flex;
   align-items: flex-start;
@@ -79,6 +83,11 @@
 .failed .badge {
   background-color: #fdecea;
   color: #7a2618;
+}
+
+.denied .badge {
+  background-color: var(--color-orange-tint);
+  color: var(--color-orange-dark);
 }
 
 .detail {

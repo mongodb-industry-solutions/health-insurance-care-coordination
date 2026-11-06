@@ -5,7 +5,10 @@ import {
   fetchPlan,
   fetchPlans,
   fetchPolicy,
+  fetchPrecedent,
 } from "@/lib/api/members";
+import { resolveTherapy } from "@/lib/costPresenter";
+import { findPlanTreatment } from "@/lib/insurancePresenter";
 
 /**
  * Loads whatever a given tool needs.
@@ -14,8 +17,10 @@ import {
  * already exist in the backend, so nothing here is a placeholder:
  *   claim-history           → /api/claims/member/{id}
  *   decision-tracing        → /api/audit/member/{id}/traces
- *   premium-calculation     → /api/policies/{policyId} + /api/plans/{planId}
- *   plan-comparison         → the same pair, plus /api/plans for the catalog
+ *   premium-calculation     → the Cost Estimator: policy + plan, the member's claims
+ *                             and traces, and /api/claims/precedent for a reference price
+ *   plan-comparison         → /api/policies/{policyId} + /api/plans/{planId}, plus
+ *                             /api/plans for the catalog
  *   clinical-history-review → already on the member document, no request
  *   recent-care-gaps        → nothing; no care-gap object exists (see CareGapsTool)
  *
@@ -47,12 +52,45 @@ export function useToolData(toolId, member) {
         } else if (toolId === "decision-tracing") {
           const response = await fetchMemberTraces(memberId);
           if (active) setData({ traces: response.traces ?? [] });
-        } else if (
-          toolId === "premium-calculation" ||
-          toolId === "plan-comparison"
-        ) {
-          // Same policy → plan pair for both tools; they are separate drawer
-          // entries so each fetches independently.
+        } else if (toolId === "premium-calculation") {
+          const policy = await fetchPolicy(policyId);
+          const planId = policy.planId ?? policy.plan_id;
+          const plan = planId ? await fetchPlan(planId) : null;
+
+          // Claims and traces sharpen the estimate (what is already owed this year,
+          // where the request stands) but must not take the tool down with them.
+          const [claimsResult, tracesResult] = await Promise.allSettled([
+            fetchMemberClaims(memberId),
+            fetchMemberTraces(memberId),
+          ]);
+
+          // The reference price: what other members were billed for this same therapy.
+          const { therapy, diagnosisCode } = resolveTherapy(member);
+          const treatment = findPlanTreatment(plan, therapy, diagnosisCode);
+          const procedureCode = treatment?.treatmentCode ?? treatment?.treatment_code;
+          let precedent = null;
+          if (procedureCode) {
+            try {
+              precedent = await fetchPrecedent({ procedureCode, diagnosisCode, memberId });
+            } catch {
+              precedent = null; // no price is a smaller estimate, not a broken tool
+            }
+          }
+
+          if (active) {
+            setData({
+              policy,
+              plan,
+              claims:
+                claimsResult.status === "fulfilled" ? claimsResult.value.claims ?? [] : [],
+              traces:
+                tracesResult.status === "fulfilled" ? tracesResult.value.traces ?? [] : [],
+              precedent,
+            });
+          }
+        } else if (toolId === "plan-comparison") {
+          // Same policy → plan pair, plus the catalog; each drawer entry fetches
+          // independently.
           const policy = await fetchPolicy(policyId);
           const planId = policy.planId ?? policy.plan_id;
           const plan = planId ? await fetchPlan(planId) : null;

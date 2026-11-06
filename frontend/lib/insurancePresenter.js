@@ -116,6 +116,32 @@ export function toOutOfPocket({ plan, activeTier, claims = [], year }) {
 }
 
 /**
+ * The plan's `treatments[]` entry for a therapy, or null.
+ *
+ * Matches on the therapy name (the plan names it in prose, e.g. "Secukinumab
+ * (Cosentyx) therapy") and, when the diagnosis is known, on the condition too:
+ * the same drug is listed once per condition it applies to.
+ */
+export function findPlanTreatment(plan, therapyName, diagnosisCode) {
+  if (!therapyName) return null;
+
+  const treatments = plan?.treatments ?? [];
+  const wanted = String(therapyName).toLowerCase();
+
+  return (
+    treatments.find((treatment) => {
+      const name = String(
+        pick(treatment, "treatment_name", "treatmentName") ?? treatment.drug ?? ""
+      ).toLowerCase();
+      const conditionMatches =
+        !diagnosisCode || !treatment.condition || treatment.condition === diagnosisCode;
+
+      return conditionMatches && name.includes(wanted);
+    }) ?? null
+  );
+}
+
+/**
  * How the plan treats the therapy the member is actually waiting on.
  *
  * `plan.treatments` is keyed by treatment code *and* condition — the same drug
@@ -124,21 +150,7 @@ export function toOutOfPocket({ plan, activeTier, claims = [], year }) {
  * action's related diagnosis code.
  */
 export function toRequestedTreatment({ plan, therapyName, diagnosisCode }) {
-  if (!therapyName) return null;
-
-  const treatments = plan?.treatments ?? [];
-  const wanted = String(therapyName).toLowerCase();
-
-  const match = treatments.find((treatment) => {
-    const name = String(
-      pick(treatment, "treatment_name", "treatmentName") ?? treatment.drug ?? ""
-    ).toLowerCase();
-    const conditionMatches =
-      !diagnosisCode || !treatment.condition || treatment.condition === diagnosisCode;
-
-    return conditionMatches && name.includes(wanted);
-  });
-
+  const match = findPlanTreatment(plan, therapyName, diagnosisCode);
   if (!match) return null;
 
   const priorAuth = pick(match, "prior_auth_required", "priorAuthRequired");

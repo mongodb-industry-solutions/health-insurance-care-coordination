@@ -90,3 +90,20 @@ class MemberClaimsResponse(BaseModel):
     member_id: str
     claim_count: int
     claims: List[Claim]
+
+
+class MoneyStat(BaseModel):
+    median: Optional[float] = None
+    min: Optional[float] = None
+    max: Optional[float] = None
+
+
+class PrecedentSummary(BaseModel):
+    """Anonymous statistics over other members' approved claims for one procedure."""
+    procedure_code: str
+    diagnosis_code: Optional[str] = None
+    count: int
+    billed: MoneyStat
+    paid: MoneyStat
+    member_owed: MoneyStat
+

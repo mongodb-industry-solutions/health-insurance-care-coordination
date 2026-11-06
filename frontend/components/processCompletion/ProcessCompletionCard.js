@@ -2,7 +2,7 @@
 
 import Button from "@leafygreen-ui/button";
 import Icon from "@leafygreen-ui/icon";
-import { formatElapsed, toOutcome } from "@/lib/processPresenter";
+import { formatElapsed, outcomeGlyph, toOutcome } from "@/lib/processPresenter";
 import styles from "./ProcessCompletionCard.module.css";
 
 /**
@@ -32,10 +32,7 @@ export default function ProcessCompletionCard({ run, onReview }) {
 
         {/* Not colour alone: the badge carries an icon and a word. */}
         <span className={styles.badge}>
-          <Icon
-            glyph={outcome.tone === "success" ? "Checkmark" : "Warning"}
-            size={12}
-          />
+          <Icon glyph={outcomeGlyph(outcome.tone)} size={12} />
           {outcome.badge}
         </span>
       </div>

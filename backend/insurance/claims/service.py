@@ -5,6 +5,7 @@ backend reads them for the UI and settles them when a medical director closes an
 case, so it needs the same status guardrail the agent applies.
 """
 
+import statistics
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -120,6 +121,36 @@ class ClaimService:
         self.repository.update_fields(claim_id, updates)
         updated = self.repository.get_by_key(claim_id)
         return {k: v for k, v in (updated or {}).items() if k != "_id"}
+
+    def precedent_summary(self, procedure_code: str, diagnosis_code: str = None, exclude_member: str = None) -> dict:
+        """What other members' approved claims for this procedure looked like, as statistics.
+
+        The reference price behind the cost estimator: no price is stored on a plan, so the
+        best honest basis is what the same therapy was actually billed and paid. Aggregates
+        only (median, min, max of billed / paid / member-owed); nothing identifies a claim or
+        a member. `count` is how many claims it rests on, so the caller can say so.
+
+        Raises ValueError when no procedure code is given.
+        """
+        code = (procedure_code or "").strip().upper()
+        if not code:
+            raise ValueError("procedure_code is required.")
+        found = self.repository.find_precedent(code, diagnosis_code, exclude_member)
+
+        def stat(field):
+            values = [float(c[field]) for c in found if c.get(field) is not None]
+            if not values:
+                return {"median": None, "min": None, "max": None}
+            return {"median": statistics.median(values), "min": min(values), "max": max(values)}
+
+        return {
+            "procedure_code": code,
+            "diagnosis_code": (diagnosis_code or "").strip().upper() or None,
+            "count": len(found),
+            "billed": stat("billedAmt"),
+            "paid": stat("paidAmt"),
+            "member_owed": stat("memberOwed"),
+        }
 
     def get_member_claims(self, member_id: str) -> list:
         """Retrieve all claims for a member."""
