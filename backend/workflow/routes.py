@@ -6,7 +6,16 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from db.mdb import MongoDBConnector, get_connector
+from clinical.profiles.service import ProfileService
+from clinical.reasoning.repository import ClinicalReasoningRepository
+from db.mdb import MongoDBConnector, get_clinical_connector, get_insurance_connector
+from insurance.members.service import MemberService
+from insurance.reasoning.repository import AdminReasoningRepository
+from traces.service import TraceService
+from views.members import MemberView
+from views.review import ReviewView
+from views.traces import TraceView
+
 from .service import AuthorizationWorkflowService
 from .events import get_bus, sse, keepalive, TERMINAL_EVENTS
 from .watcher import TraceWatcher
@@ -45,32 +54,43 @@ def _report_run_failure(task, publish) -> None:
 
 
 def get_workflow_service(
-    connector: MongoDBConnector = Depends(get_connector),
+    insurance: MongoDBConnector = Depends(get_insurance_connector),
+    clinical: MongoDBConnector = Depends(get_clinical_connector),
 ) -> AuthorizationWorkflowService:
-    return AuthorizationWorkflowService(connector)
+    return AuthorizationWorkflowService(insurance, clinical)
 
 
 def get_review_service(
-    connector: MongoDBConnector = Depends(get_connector),
+    insurance: MongoDBConnector = Depends(get_insurance_connector),
+    clinical: MongoDBConnector = Depends(get_clinical_connector),
 ) -> MedicalDirectorReviewService:
-    return MedicalDirectorReviewService(connector)
+    return MedicalDirectorReviewService(insurance, clinical)
+
+
+def get_review_view(
+    insurance: MongoDBConnector = Depends(get_insurance_connector),
+    clinical: MongoDBConnector = Depends(get_clinical_connector),
+) -> ReviewView:
+    traces = TraceService(insurance)
+    trace_view = TraceView(
+        traces, AdminReasoningRepository(insurance), ClinicalReasoningRepository(clinical)
+    )
+    return ReviewView(traces, trace_view, MemberView(MemberService(insurance), ProfileService(clinical)))
 
 
 # NOTE: declared above `/authorization/{trace_id}`-style routes for the same reason
 # members/routes.py warns about — FastAPI matches in declaration order, so a literal
 # segment placed after a path parameter is unreachable.
 @router.get("/authorization/pending-review")
-async def pending_review(
-    service: MedicalDirectorReviewService = Depends(get_review_service),
-):
+async def pending_review(view: ReviewView = Depends(get_review_view)):
     """The medical director's queue — every case awaiting a human decision.
 
     Derived from the traces themselves (`review.routedToHuman` set, `review.closedBy`
     still null), so it cannot drift from reality. Each entry carries the agent's
-    recommendation, its confidence, why it escalated, and the case brief the agent
-    assembled for the reviewer.
+    recommendation, its confidence, why it escalated, and a case brief the backend assembles
+    at read time from both databases (no agent writes one: neither can see the other's data).
     """
-    return service.pending_review()
+    return view.pending_review()
 
 
 @router.post("/authorization/{trace_id}/medical-director-decision")
@@ -93,10 +113,12 @@ async def medical_director_decision(
     allowed and is recorded as an override on the trace, with `notes` kept as the
     physician's rationale.
 
-    Then it cascades: the linked claim takes the decision, and the member's pending
-    action is resolved. Both are reported in the response, and a cascade failure is
-    listed in `cascade_errors` rather than raised — the physician's decision is already
-    recorded by then and must not be unwound by a follow-up write.
+    Then it cascades: the linked claim takes the decision, the member's summary is refreshed,
+    and the clinical record is brought in line (the physician's order resolved, and
+    `approved_therapy` written on an approval). `approved` on a partially-covered case is
+    recorded as `approved_restricted`. All of it is reported in the response, and a cascade
+    failure is listed in `cascade_errors` rather than raised — the physician's decision is
+    already recorded by then and must not be unwound by a follow-up write.
 
     `medical_director_id` defaults to a demo reviewer; a real deployment would take it
     from the authenticated user rather than the query string.
@@ -142,7 +164,8 @@ async def check_can_start(
 @router.post("/members/{member_id}/authorization/start")
 async def start_authorization(
     member_id: str,
-    connector: MongoDBConnector = Depends(get_connector),
+    insurance: MongoDBConnector = Depends(get_insurance_connector),
+    clinical: MongoDBConnector = Depends(get_clinical_connector),
     service: AuthorizationWorkflowService = Depends(get_workflow_service),
     service_date: str = None,
 ):
@@ -190,7 +213,7 @@ async def start_authorization(
 
     async def event_stream():
         queue = bus.subscribe(member_id)
-        watcher = TraceWatcher(connector, bus, member_id)
+        watcher = TraceWatcher(insurance, clinical, bus, member_id)
         loop = asyncio.get_running_loop()
 
         def publish(event: str, data: dict = None):

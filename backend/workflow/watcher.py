@@ -6,8 +6,14 @@ writing. Every step, recommendation, escalation and closure reaches the browser
 because it landed in MongoDB first, which is also the property the demo is about: the
 audit trail is the live workflow state, not a log written beside it.
 
-Goes through `AuditRepository` rather than naming a collection, so the trace store
+Goes through `TraceRepository` rather than naming a collection, so the trace store
 stays defined in one place (`shared/collections.py`).
+
+The trace is an envelope: it carries no step text. Each `step` event's `detail` is joined on
+from the author's own reasoning collection (`admin_reasoning` in the insurance database,
+`clinical_reasoning` in the clinical one). The text is written before the envelope step, so
+it is already there when the change arrives. A case brief for the `escalated` event is
+assembled the same way, at the moment it is needed.
 
 Requires a replica set (any Atlas cluster). Against a standalone mongod, `watch()`
 raises and this falls back to polling the same document with the same diff logic, so
@@ -18,8 +24,16 @@ import logging
 import threading
 import time
 
+from clinical.profiles.service import ProfileService
+from clinical.reasoning.repository import ClinicalReasoningRepository
 from db.mdb import MongoDBConnector
-from audit.repository import AuditRepository
+from insurance.members.service import MemberService
+from insurance.reasoning.repository import AdminReasoningRepository
+from traces.repository import TraceRepository
+from traces.service import TraceService
+from views.members import MemberView
+from views.review import ReviewView
+from views.traces import TraceView
 
 from .events import EventBus
 
@@ -39,8 +53,21 @@ class TraceWatcher:
     cursor. The bus handles the hop back to the event loop.
     """
 
-    def __init__(self, connector: MongoDBConnector, bus: EventBus, member_id: str):
-        self.repository = AuditRepository(connector)
+    def __init__(
+        self,
+        insurance: MongoDBConnector,
+        clinical: MongoDBConnector,
+        bus: EventBus,
+        member_id: str,
+    ):
+        self.repository = TraceRepository(insurance)
+        traces = TraceService(insurance)
+        self._trace_view = TraceView(
+            traces, AdminReasoningRepository(insurance), ClinicalReasoningRepository(clinical)
+        )
+        self._review_view = ReviewView(
+            traces, self._trace_view, MemberView(MemberService(insurance), ProfileService(clinical))
+        )
         self.bus = bus
         self.member_id = member_id
         self._stop = threading.Event()
@@ -97,17 +124,21 @@ class TraceWatcher:
             })
 
         steps = trace.get("steps") or []
-        for step in steps[self._seen_steps:]:
+        new_steps = steps[self._seen_steps:]
+        details = self._details_for(trace, new_steps)
+        for step in new_steps:
             self._emit("step", {
                 "trace_id": trace_id,
                 "step_id": step.get("stepId"),
                 "name": step.get("name"),
                 "memory_type": step.get("memoryType"),
+                # administrative | clinical: which side of the data boundary wrote it.
+                "domain": step.get("domain"),
                 # Which agent wrote it, straight off the record — so the UI does not
                 # have to infer it from the last turn_started it happened to see.
                 "recorded_by": step.get("recordedBy"),
                 "confidence": step.get("confidence"),
-                "detail": step.get("detail"),
+                "detail": details.get(step.get("stepId")),
             })
         self._seen_steps = len(steps)
 
@@ -129,7 +160,8 @@ class TraceWatcher:
                 "trace_id": trace_id,
                 "reason": (trace.get("audit") or {}).get("reviewRequiredReason"),
                 "final_decision_maker": review.get("finalDecisionMaker"),
-                "case_brief": review.get("caseBrief"),
+                # Assembled now, from both databases: nobody writes a brief any more.
+                "case_brief": self._case_brief(trace),
             })
 
         if review.get("closedBy") and not self._seen_closed:
@@ -140,6 +172,30 @@ class TraceWatcher:
                 "decision": decision,
                 "closed_by": review.get("closedBy"),
             })
+
+    def _details_for(self, trace: dict, steps: list) -> dict:
+        """{stepId: text} for the given steps, joined from the author's reasoning store.
+
+        Never raises: a lookup failure must not silence the event stream, so a step whose
+        text cannot be read is reported with `detail: None` and the rest carry on.
+        """
+        if not steps:
+            return {}
+        try:
+            hydrated = self._trace_view.hydrate_many([{**trace, "steps": steps}])[0]
+            return {s.get("stepId"): s.get("detail") for s in hydrated["steps"]}
+        except Exception as e:  # noqa: BLE001
+            logger.warning("could not read step text for %s: %s", trace.get("traceId"), e)
+            return {}
+
+    def _case_brief(self, trace: dict):
+        try:
+            hydrated = self._trace_view.hydrate_many([trace])[0]
+            member = self._review_view.members.compose(trace.get("subjectRef"))
+            return self._review_view.brief(hydrated, member)["text"]
+        except Exception as e:  # noqa: BLE001
+            logger.warning("could not assemble the case brief for %s: %s", trace.get("traceId"), e)
+            return None
 
     # --- sources --------------------------------------------------------------
 
@@ -182,7 +238,7 @@ class TraceWatcher:
 
     def _current_trace(self) -> dict:
         """The member's newest trace, whatever state it is in."""
-        traces = self.repository.find_by_member(self.member_id) or []
+        traces = self.repository.find_by_subject(self.member_id) or []
         if not traces:
             return None
         return max(traces, key=lambda t: t.get("createdAt") or "")

@@ -1,35 +1,37 @@
-"""Canonical collection names for the care-coordination data model.
+"""Canonical collection names, one class per database.
 
-One database (`insurance_hc_agentic_care_layer`). The official data model has
-five business objects — Member, Policy, Plan, Claim, Audit Log — plus the
-member-facing `notifications` collection (outside the formal model) and
-`guidelines` reference data.
-
+The data model is split across two databases (see `db/mdb.py`), and which database a
+collection lives in is the fact that matters most, so each database has its own class.
 Keeping the names here means repositories and seed code never hard-code strings.
 
-Note on `AUDIT_LOG`: in the official model the Audit Log IS the regulator-ready
-decision trace (decisionType PRIOR_AUTHORIZATION, with a memory-typed `steps[]`
-array, an `outcome`, and a `review` block). It replaced the former standalone
-`authorizations` collection AND the former append-only per-read event trail —
-prior-authorization decisions now live here as trace documents.
+`Collections` is the **insurance** database. `ClinicalCollections` is the **clinical**
+database. `AUDIT_LOG` is the one object both agents touch: the shared authorization trace,
+an envelope held in the insurance database. It carries no step text and no clinical or
+insurance detail; the text lives in `ADMIN_REASONING` (insurance) and `CLINICAL_REASONING`
+(clinical), referenced from the trace's `steps[].detailRef`.
 
-The collection is named `audit_log`, matching the object's name in the data model
-and the database that holds the seeded traces. It was briefly mapped to
-`decision_traces`, which left the backend reading and writing an entirely separate
-collection from the one holding the real data — the seeded member traces were
-invisible to every endpoint, and runtime writes accumulated somewhere nothing read
-from. If a `decision_traces` collection still exists on a cluster, it is that
-orphan and holds no canonical data.
+The collection is named `audit_log`, matching the data model. It was once mapped to
+`decision_traces`, which left the backend reading and writing a different collection from
+the one holding the real data. If a `decision_traces` collection still exists on a
+cluster, it is that orphan and holds no canonical data.
 """
 
 
 class Collections:
+    """The insurance database."""
+
     MEMBERS = "members"
     POLICIES = "policies"
     PLANS = "plans"
     CLAIMS = "claims"
-    # Decision-trace store (regulator-ready). Prior-authorization decisions are
-    # documents here; there is no separate `authorizations` collection.
     AUDIT_LOG = "audit_log"
+    ADMIN_REASONING = "admin_reasoning"
+
+
+class ClinicalCollections:
+    """The clinical database."""
+
+    CLINICAL_PROFILES = "clinical_profiles"
+    DISPENSE_HISTORY = "dispense_history"
     GUIDELINES = "guidelines"
-    NOTIFICATIONS = "notifications"
+    CLINICAL_REASONING = "clinical_reasoning"

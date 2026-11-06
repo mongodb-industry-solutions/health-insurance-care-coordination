@@ -69,27 +69,6 @@ class Claim(BaseModel):
         populate_by_name = True
 
 
-class ComparableClaim(BaseModel):
-    """Projected shape returned by comparable-case retrieval (episodic memory).
-
-    Only the fields the agent needs to judge similarity — service, outcome, and
-    the presentation_profile — plus ids to cite the precedent.
-
-    `service` and `outcome` are the shape the agent's prompts already read. The
-    repository maps them from the coded fields the final data model actually
-    carries (`procedureDesc` and `status`), so this response shape is stable even
-    though its source fields changed.
-    """
-    claim_id: str = Field(alias="claimId")
-    member_id: Optional[str] = Field(default=None, alias="memberId")
-    service: Optional[str] = None
-    outcome: Optional[str] = None
-    presentation_profile: Optional[Dict[str, Any]] = None
-
-    class Config:
-        populate_by_name = True
-
-
 class RefillGap(BaseModel):
     """A break in a medication's refill cadence, found in the pharmacy claims."""
     drug: str
@@ -107,23 +86,7 @@ class RefillGapsResponse(BaseModel):
     gaps: List[RefillGap]
 
 
-class ComparableClaimsQuery(BaseModel):
-    service: str
-    diagnosis: str
-
-
-class ComparableClaimsResponse(BaseModel):
-    query: ComparableClaimsQuery
-    count: int
-    claims: List[ComparableClaim]
-
-
 class MemberClaimsResponse(BaseModel):
     member_id: str
     claim_count: int
-    claims: List[Claim]
-
-
-class ClaimsList(BaseModel):
-    count: int
     claims: List[Claim]

@@ -26,10 +26,13 @@ class Repository:
     # the collection genuinely has no separate business key.
     business_key: str = "_id"
 
-    def __init__(self, connector: MongoDBConnector | None = None):
+    def __init__(self, connector: MongoDBConnector):
+        """`connector` is required: a repository belongs to exactly one database, and which
+        one is visible at the call site (`get_insurance_connector()` or
+        `get_clinical_connector()`), never defaulted."""
         if not self.collection_name:
             raise ValueError("Subclasses must set `collection_name`.")
-        self.connector = connector or MongoDBConnector()
+        self.connector = connector
 
     @property
     def collection(self):
@@ -55,10 +58,15 @@ class Repository:
         return self.collection.insert_many(documents).inserted_ids
 
     def upsert(self, document):
-        """Replace-by-_id upsert. Makes re-seeding idempotent."""
-        doc_id = document["_id"]
-        self.collection.replace_one({"_id": doc_id}, document, upsert=True)
-        return doc_id
+        """Replace-by-business-key upsert. Makes re-seeding idempotent.
+
+        Keyed on `business_key`, not `_id`: the seed files carry no `_id` (MongoDB assigns
+        an ObjectId on insert), so an upsert keyed on `_id` would raise `KeyError` or
+        insert a duplicate beside the document already there.
+        """
+        key = document[self.business_key]
+        self.collection.replace_one({self.business_key: key}, document, upsert=True)
+        return key
 
     def upsert_many(self, documents):
         return [self.upsert(doc) for doc in documents]
