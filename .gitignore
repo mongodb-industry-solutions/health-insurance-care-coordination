@@ -241,4 +241,11 @@ frontend/next-env.d.ts
 
 
 */data
+*data/
 *chat-resources/
+
+solution-library-dev/
+
+
+*docs/
+*tests/

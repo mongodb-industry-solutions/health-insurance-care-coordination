@@ -19,7 +19,7 @@ export const TOOL_CATEGORIES = [
 export const TOOLS = [
   {
     id: "premium-calculation",
-    label: "Premium Calculation",
+    label: "Cost Estimator",
     category: "insurance",
     icon: "Coin", // no calculator glyph
   },

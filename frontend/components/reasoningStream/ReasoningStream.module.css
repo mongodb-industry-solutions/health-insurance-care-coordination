@@ -262,6 +262,19 @@
   color: #6b4e00;
 }
 
+.denied {
+  background-color: var(--color-orange-tint);
+}
+
+.denied .milestoneIcon {
+  background-color: var(--color-orange);
+  color: #ffffff;
+}
+
+.denied .milestoneText {
+  color: var(--color-orange-dark);
+}
+
 .error {
   background-color: #fdecea;
 }
@@ -282,6 +295,10 @@
 
 .error.terminal {
   border-color: rgba(177, 55, 31, 0.3);
+}
+
+.denied.terminal {
+  border-color: rgba(217, 101, 10, 0.35);
 }
 
 /* Live tail -------------------------------------------------------------- */

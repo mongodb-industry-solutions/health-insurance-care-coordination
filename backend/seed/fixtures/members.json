@@ -1,0 +1,141 @@
+[
+  {
+    "memberId": "MBR-2026-44109",
+    "policyId": "POL-HP-2026-04410",
+    "firstName": "Maria",
+    "lastName": "Reyes",
+    "dateOfBirth": "1983-04-12",
+    "gender": "female",
+    "state": "IL",
+    "preferredLanguage": "en",
+    "sin_encrypted": "enc::SIN::**************",
+    "eligibility": {
+      "status": "active",
+      "effectiveDate": "2025-11-25",
+      "tier": "specialty"
+    },
+    "summary": {
+      "open_authorization_count": 0,
+      "last_authorization_status": "none",
+      "updated_at": "2026-08-20T15:03:07Z"
+    },
+    "createdAt": "2025-11-25T00:00:00Z",
+    "updatedAt": "2026-08-20T15:03:07Z"
+  },
+  {
+    "memberId": "MBR-2026-51882",
+    "policyId": "POL-HP-2026-05188",
+    "firstName": "Robert",
+    "lastName": "Chen",
+    "dateOfBirth": "1975-11-03",
+    "gender": "male",
+    "state": "TX",
+    "preferredLanguage": "en",
+    "sin_encrypted": "enc::SIN::**************",
+    "eligibility": {
+      "status": "active",
+      "effectiveDate": "2025-10-26",
+      "tier": "specialty"
+    },
+    "summary": {
+      "open_authorization_count": 0,
+      "last_authorization_status": "none",
+      "updated_at": "2026-08-20T15:03:09Z"
+    },
+    "createdAt": "2025-10-26T00:00:00Z",
+    "updatedAt": "2026-08-20T15:03:09Z"
+  },
+  {
+    "memberId": "MBR-2026-60417",
+    "policyId": "POL-HP-2026-06041",
+    "firstName": "Aisha",
+    "lastName": "Bello",
+    "dateOfBirth": "1990-07-22",
+    "gender": "female",
+    "state": "NY",
+    "preferredLanguage": "en",
+    "sin_encrypted": "enc::SIN::**************",
+    "eligibility": {
+      "status": "active",
+      "effectiveDate": "2025-12-25",
+      "tier": "specialty"
+    },
+    "summary": {
+      "open_authorization_count": 0,
+      "last_authorization_status": "none",
+      "updated_at": "2026-08-20T15:03:11Z"
+    },
+    "createdAt": "2025-12-25T00:00:00Z",
+    "updatedAt": "2026-08-20T15:03:11Z"
+  },
+  {
+    "memberId": "MBR-2026-73305",
+    "policyId": "POL-HP-2026-08841",
+    "firstName": "David",
+    "lastName": "Thompson",
+    "dateOfBirth": "1968-02-17",
+    "gender": "male",
+    "state": "IL",
+    "preferredLanguage": "en",
+    "sin_encrypted": "enc::SIN::**************",
+    "eligibility": {
+      "status": "active",
+      "effectiveDate": "2026-03-25",
+      "tier": "specialty"
+    },
+    "summary": {
+      "open_authorization_count": 0,
+      "last_authorization_status": "none",
+      "updated_at": "2026-08-20T15:03:13Z"
+    },
+    "createdAt": "2026-03-25T00:00:00Z",
+    "updatedAt": "2026-08-20T15:03:13Z"
+  },
+  {
+    "memberId": "MBR-2026-88214",
+    "policyId": "POL-HP-2026-08821",
+    "firstName": "Grace",
+    "lastName": "Kim",
+    "dateOfBirth": "1979-09-30",
+    "gender": "female",
+    "state": "IL",
+    "preferredLanguage": "en",
+    "sin_encrypted": "enc::SIN::**************",
+    "eligibility": {
+      "status": "active",
+      "effectiveDate": "2025-11-25",
+      "tier": "standard"
+    },
+    "summary": {
+      "open_authorization_count": 0,
+      "last_authorization_status": "none",
+      "updated_at": "2026-08-20T15:03:14Z"
+    },
+    "createdAt": "2025-11-25T00:00:00Z",
+    "updatedAt": "2026-08-20T15:03:14Z"
+  },
+  {
+    "memberId": "MBR-2026-90733",
+    "policyId": "POL-HP-2026-09073",
+    "firstName": "Frank",
+    "lastName": "Alvarez",
+    "dateOfBirth": "1972-06-08",
+    "gender": "male",
+    "state": "CA",
+    "preferredLanguage": "en",
+    "sin_encrypted": "enc::SIN::**************",
+    "eligibility": {
+      "status": "termed",
+      "effectiveDate": "2025-10-26",
+      "tier": "specialty",
+      "termDate": "2026-07-21"
+    },
+    "summary": {
+      "open_authorization_count": 0,
+      "last_authorization_status": "none",
+      "updated_at": "2026-08-20T15:03:16Z"
+    },
+    "createdAt": "2025-10-26T00:00:00Z",
+    "updatedAt": "2026-08-20T15:03:16Z"
+  }
+]

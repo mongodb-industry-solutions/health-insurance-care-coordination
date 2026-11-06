@@ -72,6 +72,20 @@ export function fetchMemberTraces(memberId) {
   return apiFetch(`/api/audit/member/${memberId}/traces`);
 }
 
+/**
+ * GET /api/claims/precedent — anonymous price statistics for a therapy, from other
+ * members' approved claims: `{count, billed, paid, member_owed}`, each a
+ * `{median, min, max}`. The reference price behind the Cost Estimator; nothing in it
+ * identifies a claim or a member.
+ */
+export function fetchPrecedent({ procedureCode, diagnosisCode, memberId }) {
+  const params = new URLSearchParams({ procedure_code: procedureCode });
+  if (diagnosisCode) params.set("diagnosis_code", diagnosisCode);
+  if (memberId) params.set("member_id", memberId);
+
+  return apiFetch(`/api/claims/precedent?${params}`);
+}
+
 /** GET /api/plans/{planId} — carries `coverage.tiers` for the tier cards. */
 export function fetchPlan(planId) {
   return apiFetch(`/api/plans/${planId}`);

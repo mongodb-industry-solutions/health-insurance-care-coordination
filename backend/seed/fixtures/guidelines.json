@@ -1,0 +1,62 @@
+[
+  {
+    "guidelineId": "CMG-RA-2026.3",
+    "condition": "M06.9",
+    "effective_date": "2026-06-01",
+    "classification": {
+      "secukinumab": {
+        "class": "biologic",
+        "tier": "specialty",
+        "prior_auth_required": true
+      }
+    },
+    "criteria": {
+      "step_therapy": {
+        "drug": "Methotrexate",
+        "min_months": 6
+      },
+      "coverage_tier": "specialty"
+    },
+    "confidence_threshold": 0.9
+  },
+  {
+    "guidelineId": "CMG-PSA-2026.1",
+    "condition": "L40.50",
+    "effective_date": "2026-01-01",
+    "classification": {
+      "adalimumab": {
+        "class": "biologic",
+        "tier": "specialty",
+        "prior_auth_required": true
+      }
+    },
+    "criteria": {
+      "step_therapy": {
+        "drug": "Methotrexate",
+        "min_months": 6
+      },
+      "coverage_tier": "specialty"
+    },
+    "confidence_threshold": 0.9
+  },
+  {
+    "guidelineId": "CMG-IBD-2026.2",
+    "condition": "K50.90",
+    "effective_date": "2026-03-01",
+    "classification": {
+      "ustekinumab": {
+        "class": "biologic",
+        "tier": "specialty",
+        "prior_auth_required": true
+      }
+    },
+    "criteria": {
+      "step_therapy": {
+        "drug": "Azathioprine",
+        "min_months": 6
+      },
+      "coverage_tier": "specialty"
+    },
+    "confidence_threshold": 0.92
+  }
+]

@@ -15,19 +15,22 @@ the router entirely for anything but a demo.
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from db.mdb import MongoDBConnector, get_connector
+from db.mdb import MongoDBConnector, get_clinical_connector, get_insurance_connector
 from .service import AdminService
 
 router = APIRouter(prefix="", tags=["admin"])
 
 
-def get_admin_service(connector: MongoDBConnector = Depends(get_connector)) -> AdminService:
-    return AdminService(connector)
+def get_admin_service(
+    insurance: MongoDBConnector = Depends(get_insurance_connector),
+    clinical: MongoDBConnector = Depends(get_clinical_connector),
+) -> AdminService:
+    return AdminService(insurance, clinical)
 
 
 @router.post("/seed")
 async def seed_canonical(service: AdminService = Depends(get_admin_service)):
-    """Load the canonical profiles (idempotent upsert; nothing is wiped)."""
+    """Load the canonical fixtures into both databases (idempotent upsert; nothing is wiped)."""
     return service.seed_canonical()
 
 
@@ -35,11 +38,11 @@ async def seed_canonical(service: AdminService = Depends(get_admin_service)):
 async def reset_all(service: AdminService = Depends(get_admin_service)):
     """Rebuild the whole demo dataset from scratch — the blunt instrument.
 
-    Deletes every document from all seven seeded collections (members, policies,
-    claims, audit_log, guidelines, plans, notifications), then reseeds the canonical
-    six members plus the shared catalog: plans, guidelines and the precedent claims
-    that comparable-case lookup reads. Nothing is preserved, including audit rows this
-    is otherwise the only code allowed to delete.
+    Deletes every document from the seeded collections in BOTH databases (insurance:
+    members, policies, plans, claims, audit_log, admin_reasoning; clinical:
+    clinical_profiles, dispense_history, guidelines, clinical_reasoning), then reseeds the
+    canonical six members plus the shared catalog from the fixtures. Nothing is preserved,
+    including audit rows this is otherwise the only code allowed to delete.
 
     Reach for it when the shared data has drifted or a schema change has made existing
     documents stale. For replaying one member's scenario after a demo run, use
@@ -57,12 +60,11 @@ async def reset_member(
 ):
     """Restore one member to a clean pre-process state so their scenario replays.
 
-    Regenerates the member, their policy and their full claim history from the
-    canonical profile, and deletes the audit trace and notifications the last run
-    produced. The member document is *replaced*, not edited, so everything a run
-    mutated reverts together — `pendingActions[]` back to `pending` with
-    `linkedAuditTraceId` null, `summary.open_authorization_count` back to 0,
-    `summary.last_authorization_status` back to `none`.
+    Deletes the member's traces, the reasoning text of those traces on both sides, and the
+    claims the last run added, then re-upserts the baseline from the fixtures: the insurance
+    record (`summary.open_authorization_count` back to 0, `last_authorization_status` back to
+    `none`) and the clinical profile (`pendingActions[]` back to `pending` with
+    `linkedAuditTraceId` null, the care plan and any `gap_reviewed` entry back to baseline).
 
     Other members are untouched, as are the shared plans, guidelines and precedent
     claims. Use `POST /reset-demo` when the shared catalog needs rebuilding too.

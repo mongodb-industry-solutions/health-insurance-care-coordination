@@ -25,9 +25,8 @@ function MongoLeaf() {
  * Top bar of the main app: brand on the left, session actions on the right.
  *
  * @param {() => void} props.onLogOut
- * @param {() => void} props.onOpenSettings
  */
-export default function AppHeader({ onLogOut, onOpenSettings }) {
+export default function AppHeader({ onLogOut }) {
   return (
     <header className={styles.header}>
       <div className={styles.brand}>
@@ -41,17 +40,6 @@ export default function AppHeader({ onLogOut, onOpenSettings }) {
             <Icon glyph="ArrowRight" size={20} />
           </span>
           <span className={styles.actionLabel}>Log Out</span>
-        </button>
-
-        <button
-          type="button"
-          className={styles.action}
-          onClick={onOpenSettings}
-        >
-          <span className={styles.actionIcon}>
-            <Icon glyph="Settings" size={20} />
-          </span>
-          <span className={styles.actionLabel}>Settings</span>
         </button>
       </div>
     </header>

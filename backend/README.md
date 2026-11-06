@@ -69,3 +69,84 @@ After setting up the backend dependencies, you can run the development server:
 3. The backend API will be accessible at http://localhost:8000
 
 **Note**: If port 8000 is already in use (e.g., by Docker containers), either stop the containers with `make clean` or use a different port like `--port 8001`.
+
+## Data: two databases
+
+The data is split across two databases on one cluster, and the backend is the only component
+that holds both (each agent holds one). Set, in `.env` or the deployment config:
+
+| Variable | Meaning |
+|---|---|
+| `MONGODB_URI` | one connection string for both |
+| `INSURANCE_DATABASE` | members, policies, plans, claims, the shared trace (`audit_log`), `admin_reasoning`. Falls back to `DATABASE_NAME` so an existing single-database deployment keeps its insurance routes. |
+| `CLINICAL_DATABASE` | clinical profiles, dispense history, guidelines, `clinical_reasoning` |
+
+A missing name is a `503` that names the variable, on the routes that need it. Create the
+indexes in both with `python -m db.indexes`, and load the demo data with
+`python -m seed.seed_data [--reset]` (the same code as `POST /reset-demo`).
+
+## Calling the agents
+
+Both agents are deployed on Atlas Agent Engine and reached the same way by the workflow and the chat
+(`shared/aae_client.py`): an OAuth token from a service account, then
+`POST https://agentengine.mongodb.com/api/v1/projects/{project}/workspaces/{workspace}/invoke`
+(`invokeStream` for the chat), with the API contract pinned in `Accept`. There is no local mode.
+
+| Variable | Meaning |
+|---|---|
+| `AGENT_INVOKE_MODE` | `dry_run` (the default: records what it would send and calls nothing) or anything else = call the deployed agents |
+| `AAE_CLIENT_ID`, `AAE_CLIENT_SECRET` | the service account (project role `PROJECT_OWNER`, which invoking requires) |
+| `AAE_PROJECT_ID` | the project, shared by both agents |
+| `INSURANCE_AGENT_WORKSPACE_ID`, `CARE_AGENT_WORKSPACE_ID` | one workspace per agent |
+| `INSURANCE_AGENT_PROJECT_ID`, `CARE_AGENT_PROJECT_ID` | optional: override `AAE_PROJECT_ID` for one agent |
+| `AGENT_INVOKE_TIMEOUT` | seconds to wait for one blocking turn (default 900) |
+| `AGENT_TURN_GRACE_SECONDS` | after a turn times out (the platform's `AGENT_TIMEOUT` 504, or ours), keep reading the case this long for the agent's work to land, then continue (default 600; `0` = fail immediately) |
+| `AGENT_GRACE_POLL_SECONDS` | how often to read it during that wait (default 5) |
+| `AAE_BASE_URL`, `AAE_API_ACCEPT`, `AAE_POOL_RETRIES` | optional: platform URL, pinned API version, retries on "pool full" (default 3) |
+
+A missing variable is a `503` naming every one that is missing (never a value). Check the setup from this
+machine, without running the app:
+
+```bash
+cd backend
+python scripts/check_agents.py             # configuration + access token
+python scripts/check_agents.py --invoke    # also sends one harmless message to each agent
+```
+
+## Layout
+
+Grouped by which database a package touches, not by data object:
+
+```
+db/          two connectors (insurance, clinical) and the index script
+shared/      collection names, the summary derivation, and the Agent Engine client
+insurance/   members, policies, plans, claims, admin_reasoning   -> insurance database only
+clinical/    profiles, clinical_reasoning                        -> clinical database only
+traces/      the shared authorization envelope and its stage machine (names `traces`, not
+             `trace`, so it cannot shadow the standard-library module)
+views/       composed reads: the combined member, traces with their step text, the director's
+             queue and brief. The only place the two sides meet for the UI.
+workflow/    start / live progress / the medical director's decision, and the clinical sync
+admin/ seed/ demo seed and reset, from the JSON in seed/fixtures/
+chat/        free-form chat with the two agents
+```
+
+`insurance/` and `clinical/` never import each other; `traces/` imports neither. Only
+`views/`, `workflow/` and `admin/` may import both. `tests/test_boundaries.py` enforces it.
+Route paths are unchanged, so the frontend does not notice the split.
+
+## Tests
+
+No pytest and no extra dependencies in `pyproject.toml`; each file is a script that uses
+in-memory MongoDB and runs the real agents' data-layer code against it:
+
+```bash
+cd backend
+uv run --with mongomock --with httpx python tests/test_backend.py        # routes, workflow, director, watcher
+uv run --with mongomock --with httpx python tests/test_aae_transport.py  # the agent transport, against a fake platform
+uv run python tests/test_boundaries.py                                  # import rules
+uv run --with mongomock python tests/test_seed_fixtures.py              # fixtures + agent contract
+```
+
+See [`docs/UI_CHANGES.md`](docs/UI_CHANGES.md) for what the frontend sees, and
+[`docs/FOLLOW_UPS.md`](docs/FOLLOW_UPS.md) for what is deliberately left open.

@@ -172,6 +172,8 @@ export function toStepRows(run) {
 export function toStreamEntries(run) {
   const entries = [];
   let stage = 0;
+  // The decision the case was closed with, so the run's last line can match it.
+  let closedDecision = null;
 
   run.events.forEach(({ event, data, at }, index) => {
     const push = (entry) => entries.push({ id: `${index}-${event}`, at, ...entry });
@@ -224,7 +226,7 @@ export function toStreamEntries(run) {
         push({
           kind: "milestone",
           icon: "Charts",
-          tone: "accent",
+          tone: isDenied(data.decision) ? "denied" : "accent",
           text: `Recommendation: ${data.decision}${
             typeof data.confidence === "number"
               ? ` at ${data.confidence.toFixed(2)} confidence`
@@ -245,10 +247,11 @@ export function toStreamEntries(run) {
         break;
 
       case "closed":
+        closedDecision = data.decision;
         push({
           kind: "milestone",
-          icon: "Checkmark",
-          tone: "accent",
+          icon: isDenied(data.decision) ? "XWithCircle" : "Checkmark",
+          tone: isDenied(data.decision) ? "denied" : "accent",
           text: `Case closed as ${String(data.decision).replace(/_/g, " ")} by ${
             data.closed_by ?? "the agent"
           }.`,
@@ -258,7 +261,8 @@ export function toStreamEntries(run) {
       case "stopped":
         push({
           kind: "terminal",
-          icon: "CheckmarkWithCircle",
+          icon: isDenied(closedDecision) ? "XWithCircle" : "CheckmarkWithCircle",
+          tone: isDenied(closedDecision) ? "denied" : undefined,
           text: `Run finished — ${String(data.reason).replace(/_/g, " ")}.`,
         });
         break;
@@ -297,6 +301,18 @@ export function toOverallProgress(run) {
  * agent was allowed to decide. An escalation is the case the reviewer must pick
  * up, so it gets its own amber state rather than being folded into success.
  */
+/** Is this decision a denial? `denied`, or anything that spells it that way. */
+export function isDenied(decision) {
+  return String(decision ?? "").toLowerCase().includes("denied");
+}
+
+/** The icon for a settled run: a tick for success, a cross for a denial, else a warning. */
+export function outcomeGlyph(tone) {
+  if (tone === "success") return "Checkmark";
+  if (tone === "denied") return "XWithCircle";
+  return "Warning";
+}
+
 export function toOutcome(run) {
   if (run.status === "error") {
     return {
@@ -331,6 +347,19 @@ export function toOutcome(run) {
           ? "An agent finished its turn without moving the case forward."
           : "The live connection ended before the run reported a result.",
       cta: "Review manually",
+    };
+  }
+
+  // The agent closed the case, and the decision was a denial (an eligibility or benefit
+  // exclusion it may decide on its own). The process worked; the answer was no, so it
+  // must not read as a success.
+  if (isDenied(run.closure?.decision)) {
+    return {
+      tone: "denied",
+      badge: "Denied",
+      title: "Request Denied",
+      detail: `Closed as denied by ${run.closure.closed_by ?? "the agent"}.`,
+      cta: null,
     };
   }
 

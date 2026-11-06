@@ -21,6 +21,13 @@ export default function Home() {
     setStoryOpen(false);
   };
 
+  // Backing out of the story returns to the picker. `MemberSelection` stays mounted, so
+  // the card that was picked stays highlighted and can simply be swapped for another.
+  const handleCancelStory = () => {
+    setMember(null);
+    setStoryOpen(false);
+  };
+
   if (member && !storyOpen) {
     return <MemberDashboard profile={member} onLogOut={handleLogOut} />;
   }
@@ -31,7 +38,11 @@ export default function Home() {
       <MemberSelection onStart={handleStart} />
 
       {member && storyOpen && (
-        <StoryCarousel member={member} onFinish={() => setStoryOpen(false)} />
+        <StoryCarousel
+          member={member}
+          onFinish={() => setStoryOpen(false)}
+          onCancel={handleCancelStory}
+        />
       )}
     </main>
   );

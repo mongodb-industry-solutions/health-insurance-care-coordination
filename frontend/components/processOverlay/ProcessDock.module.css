@@ -46,6 +46,10 @@
   background-color: #b1371f;
 }
 
+.denied::before {
+  background-color: var(--color-orange);
+}
+
 .open {
   display: flex;
   align-items: center;
@@ -96,6 +100,10 @@
   stroke: #b1371f;
 }
 
+.denied .ringFill {
+  stroke: var(--color-orange);
+}
+
 .ringValue {
   font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   font-size: 9.5px;
@@ -113,6 +121,10 @@
 
 .failed .ringIcon {
   color: #b1371f;
+}
+
+.denied .ringIcon {
+  color: var(--color-orange);
 }
 
 .text {

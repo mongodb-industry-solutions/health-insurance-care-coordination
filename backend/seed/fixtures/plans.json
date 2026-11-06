@@ -1,0 +1,318 @@
+[
+  {
+    "planId": "PLAN-PPO-SPEC-4471",
+    "planName": "PPO Specialty Care 4471",
+    "planType": "PPO",
+    "network": "in_network_preferred",
+    "jurisdiction": "multi_state",
+    "eligibilityRules": {
+      "requiresActiveStatus": true
+    },
+    "coverage": {
+      "tiers": {
+        "standard": {
+          "covered": true,
+          "priorAuthRequired": false,
+          "coinsurance": null,
+          "copay": 25,
+          "deductible": 0,
+          "outOfPocketMax": null
+        },
+        "specialty": {
+          "covered": true,
+          "priorAuthRequired": true,
+          "coinsurance": 0.2,
+          "copay": null,
+          "deductible": 500,
+          "outOfPocketMax": 4000
+        }
+      },
+      "excludedServices": [
+        "cosmetic",
+        "experimental"
+      ]
+    },
+    "treatments": [
+      {
+        "treatmentCode": "6851",
+        "treatmentName": "Methotrexate (conventional DMARD)",
+        "condition": "M06.9",
+        "tier": "standard",
+        "covered": true,
+        "priorAuthRequired": false,
+        "steps": [
+          {
+            "stepCode": "ORAL_THERAPY",
+            "stepName": "Oral/subcutaneous methotrexate therapy",
+            "covered": true,
+            "coinsurance": null,
+            "copay": 25
+          }
+        ]
+      },
+      {
+        "treatmentCode": "6851",
+        "treatmentName": "Methotrexate (conventional DMARD)",
+        "condition": "L40.50",
+        "tier": "standard",
+        "covered": true,
+        "priorAuthRequired": false,
+        "steps": [
+          {
+            "stepCode": "ORAL_THERAPY",
+            "stepName": "Oral/subcutaneous methotrexate therapy",
+            "covered": true,
+            "coinsurance": null,
+            "copay": 25
+          }
+        ]
+      },
+      {
+        "treatmentCode": "J3590",
+        "treatmentName": "Secukinumab (Cosentyx) therapy",
+        "condition": "M06.9",
+        "tier": "specialty",
+        "covered": true,
+        "priorAuthRequired": true,
+        "steps": [
+          {
+            "stepCode": "BASELINE_LABS",
+            "stepName": "Baseline labs and TB/infection screening",
+            "covered": true,
+            "coinsurance": 0.2,
+            "copay": null
+          },
+          {
+            "stepCode": "LOADING_DOSE",
+            "stepName": "Loading dose (weeks 0-4)",
+            "covered": true,
+            "coinsurance": 0.2,
+            "copay": null
+          },
+          {
+            "stepCode": "MAINTENANCE_DOSE",
+            "stepName": "Maintenance dosing (monthly, ongoing)",
+            "covered": true,
+            "coinsurance": 0.2,
+            "copay": null
+          }
+        ]
+      },
+      {
+        "treatmentCode": "J0135",
+        "treatmentName": "Adalimumab (Humira) therapy",
+        "condition": "L40.50",
+        "tier": "specialty",
+        "covered": true,
+        "priorAuthRequired": true,
+        "steps": [
+          {
+            "stepCode": "BASELINE_LABS",
+            "stepName": "Baseline labs and TB/infection screening",
+            "covered": false,
+            "coinsurance": 0.2,
+            "copay": null
+          },
+          {
+            "stepCode": "LOADING_DOSE",
+            "stepName": "Loading dose (weeks 0-1)",
+            "covered": true,
+            "coinsurance": 0.2,
+            "copay": null
+          },
+          {
+            "stepCode": "MAINTENANCE_DOSE",
+            "stepName": "Maintenance dosing (biweekly, ongoing)",
+            "covered": true,
+            "coinsurance": 0.2,
+            "copay": null
+          }
+        ]
+      }
+    ],
+    "effectiveDate": "2025-01-01",
+    "renewalDate": "2027-01-01",
+    "schemaVersion": "1.1",
+    "createdAt": "2025-01-01T00:00:00Z",
+    "updatedAt": "2026-07-27T00:00:00Z"
+  },
+  {
+    "planId": "PLAN-HMO-SPEC-2290",
+    "planName": "HMO Specialty Care 2290",
+    "planType": "HMO",
+    "network": "in_network_required",
+    "jurisdiction": "NY",
+    "eligibilityRules": {
+      "requiresActiveStatus": true
+    },
+    "coverage": {
+      "tiers": {
+        "standard": {
+          "covered": true,
+          "priorAuthRequired": false,
+          "coinsurance": null,
+          "copay": 20,
+          "deductible": 0,
+          "outOfPocketMax": null
+        },
+        "specialty": {
+          "covered": true,
+          "priorAuthRequired": true,
+          "coinsurance": 0.25,
+          "copay": null,
+          "deductible": 750,
+          "outOfPocketMax": 5000
+        }
+      },
+      "excludedServices": [
+        "cosmetic",
+        "experimental"
+      ]
+    },
+    "treatments": [
+      {
+        "treatmentCode": "1298944",
+        "treatmentName": "Azathioprine (conventional immunomodulator)",
+        "condition": "K50.90",
+        "tier": "standard",
+        "covered": true,
+        "priorAuthRequired": false,
+        "steps": [
+          {
+            "stepCode": "ORAL_THERAPY",
+            "stepName": "Oral azathioprine therapy",
+            "covered": true,
+            "coinsurance": null,
+            "copay": 20
+          }
+        ]
+      },
+      {
+        "treatmentCode": "J3357",
+        "treatmentName": "Ustekinumab (Stelara) therapy",
+        "condition": "K50.90",
+        "tier": "specialty",
+        "covered": true,
+        "priorAuthRequired": true,
+        "steps": [
+          {
+            "stepCode": "BASELINE_LABS",
+            "stepName": "Baseline labs and TB/infection screening",
+            "covered": true,
+            "coinsurance": 0.25,
+            "copay": null
+          },
+          {
+            "stepCode": "INDUCTION_DOSE",
+            "stepName": "Weight-based IV induction dose",
+            "covered": true,
+            "coinsurance": 0.25,
+            "copay": null
+          },
+          {
+            "stepCode": "MAINTENANCE_DOSE",
+            "stepName": "Maintenance dosing (every 8 weeks, ongoing)",
+            "covered": true,
+            "coinsurance": 0.25,
+            "copay": null
+          }
+        ]
+      }
+    ],
+    "effectiveDate": "2025-01-01",
+    "renewalDate": "2027-01-01",
+    "schemaVersion": "1.1",
+    "createdAt": "2025-01-01T00:00:00Z",
+    "updatedAt": "2026-07-27T00:00:00Z"
+  },
+  {
+    "planId": "PLAN-PPO-STD-1100",
+    "planName": "PPO Standard Care 1100",
+    "planType": "PPO",
+    "network": "in_network_preferred",
+    "jurisdiction": "multi_state",
+    "eligibilityRules": {
+      "requiresActiveStatus": true
+    },
+    "coverage": {
+      "tiers": {
+        "standard": {
+          "covered": true,
+          "priorAuthRequired": false,
+          "coinsurance": null,
+          "copay": 30,
+          "deductible": 0,
+          "outOfPocketMax": null
+        },
+        "specialty": {
+          "covered": false,
+          "priorAuthRequired": null,
+          "coinsurance": null,
+          "copay": null,
+          "deductible": null,
+          "outOfPocketMax": null
+        }
+      },
+      "excludedServices": [
+        "cosmetic",
+        "experimental",
+        "specialty_tier_biologics"
+      ]
+    },
+    "treatments": [
+      {
+        "treatmentCode": "6851",
+        "treatmentName": "Methotrexate (conventional DMARD)",
+        "condition": "M06.9",
+        "tier": "standard",
+        "covered": true,
+        "priorAuthRequired": false,
+        "steps": [
+          {
+            "stepCode": "ORAL_THERAPY",
+            "stepName": "Oral/subcutaneous methotrexate therapy",
+            "covered": true,
+            "coinsurance": null,
+            "copay": 30
+          }
+        ]
+      },
+      {
+        "treatmentCode": "J3590",
+        "treatmentName": "Secukinumab (Cosentyx) therapy",
+        "condition": "M06.9",
+        "tier": "specialty",
+        "covered": false,
+        "priorAuthRequired": null,
+        "steps": [
+          {
+            "stepCode": "BASELINE_LABS",
+            "stepName": "Baseline labs and TB/infection screening",
+            "covered": false,
+            "coinsurance": null,
+            "copay": null
+          },
+          {
+            "stepCode": "LOADING_DOSE",
+            "stepName": "Loading dose (weeks 0-4)",
+            "covered": false,
+            "coinsurance": null,
+            "copay": null
+          },
+          {
+            "stepCode": "MAINTENANCE_DOSE",
+            "stepName": "Maintenance dosing (monthly, ongoing)",
+            "covered": false,
+            "coinsurance": null,
+            "copay": null
+          }
+        ]
+      }
+    ],
+    "effectiveDate": "2025-01-01",
+    "renewalDate": "2027-01-01",
+    "schemaVersion": "1.1",
+    "createdAt": "2025-01-01T00:00:00Z",
+    "updatedAt": "2026-07-27T00:00:00Z"
+  }
+]

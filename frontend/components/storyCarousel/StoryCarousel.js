@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Icon from "@leafygreen-ui/icon";
 import StoryCard from "@/components/storyCard/StoryCard";
 import { getMemberStory } from "@/lib/const/memberStories";
@@ -10,26 +10,47 @@ import styles from "./StoryCarousel.module.css";
 const EXIT_DURATION = 450;
 
 /**
- * Guided story shown over a dark veil once a member is selected. There is no
- * click-outside or Escape dismissal on purpose — the only way out is the
- * "Go to Demo" button on the last card, so the narrative can't be skipped.
+ * Guided story shown over a dark veil once a member is selected.
+ *
+ * Two ways out, both deliberate: "Go to Demo" on the last card carries on to the
+ * dashboard, and "Choose a different patient" (or Escape) backs out to the picker
+ * for someone who picked the wrong member. There is still no click-outside
+ * dismissal, so a stray click cannot skip the narrative or lose the selection.
  *
  * @param {object} props.member  The selected member.
  * @param {() => void} props.onFinish  Called after the exit animation completes.
+ * @param {() => void} [props.onCancel]  Called, after the same animation, when the
+ *   viewer backs out to choose a different patient.
  */
-export default function StoryCarousel({ member, onFinish }) {
+export default function StoryCarousel({ member, onFinish, onCancel }) {
   const story = getMemberStory(member.memberId);
   const cards = story?.cards ?? [];
   const [leaving, setLeaving] = useState(false);
   const { index, goTo, next, previous, isFirst, isLast, touchHandlers } =
     useStoryCarousel(cards.length);
 
-  if (!cards.length) return null;
-
-  const handleFinish = () => {
+  // Leaves through the exit animation, then hands control back. Guarded so a second
+  // click, or Escape pressed while the veil is fading, cannot fire the callback twice.
+  const leave = (callback) => {
+    if (leaving) return;
     setLeaving(true);
-    window.setTimeout(() => onFinish?.(), EXIT_DURATION);
+    window.setTimeout(() => callback?.(), EXIT_DURATION);
   };
+  const handleFinish = () => leave(onFinish);
+  const handleCancel = () => leave(onCancel);
+
+  // Escape backs out to the picker, the same as the button. Bound on every render so it
+  // always sees the current `leaving`.
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") handleCancel();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  });
+
+  if (!cards.length) return null;
 
   return (
     <div
@@ -90,6 +111,16 @@ export default function StoryCarousel({ member, onFinish }) {
               />
             ))}
           </div>
+
+          <button
+            type="button"
+            className={styles.exit}
+            onClick={handleCancel}
+            title="Back to patient selection (Esc)"
+          >
+            <Icon glyph="X" size={16} />
+            <span>Choose a different patient</span>
+          </button>
         </div>
 
         <button

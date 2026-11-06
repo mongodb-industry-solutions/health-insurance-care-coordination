@@ -35,9 +35,6 @@ export default function MemberDashboard({ profile, onLogOut }) {
   // Held rather than looked up: the action is resolved by the time the run ends.
   const [processAction, setProcessAction] = useState(null);
 
-  // TODO: point at the real settings route once it exists.
-  const handleOpenSettings = () => console.log("Open settings");
-
   const handleStartProcess = (actionId) => {
     const action = toPendingActions(member).find(
       (entry) => entry.id === actionId
@@ -52,7 +49,7 @@ export default function MemberDashboard({ profile, onLogOut }) {
 
   return (
     <>
-      <AppHeader onLogOut={onLogOut} onOpenSettings={handleOpenSettings} />
+      <AppHeader onLogOut={onLogOut} />
 
       {error && (
         <p className={styles.notice}>
