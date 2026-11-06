@@ -12,7 +12,7 @@ from openai import (
 )
 from langchain_core.language_models import BaseChatModel
 
-MODEL = "gpt-5.4"
+MODEL = "gpt-5.4-mini"
 
 
 def build_llm(temperature: float = 0) -> BaseChatModel:
