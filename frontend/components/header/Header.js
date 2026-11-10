@@ -3,12 +3,14 @@ import styles from "./Header.module.css";
 
 /** Placeholder nav items until the real destinations exist. */
 const DEFAULT_NAV_ITEMS = [
-  { label: "About", href: "#" },
-  { label: "Support", href: "#" },
-  { label: "Contact", href: "#" },
+  { label: "About", href: "/about" },
 ];
 
-export default function Header({ navItems = DEFAULT_NAV_ITEMS }) {
+/**
+ * `action` is an optional prominent button, e.g. { label: "Go back to Demo", href: "/", back: true }.
+ * `back` adds a leading arrow, `forward` a trailing one.
+ */
+export default function Header({ navItems = DEFAULT_NAV_ITEMS, action }) {
   return (
     <header className={styles.header}>
       <a className={styles.logo} href="/">
@@ -28,6 +30,16 @@ export default function Header({ navItems = DEFAULT_NAV_ITEMS }) {
             {item.label}
           </a>
         ))}
+        {action && (
+          <a
+            className={`${styles.actionBtn} ${action.subtle ? styles.actionBtnSubtle : ""}`}
+            href={action.href}
+          >
+            {action.back && <span aria-hidden="true">←</span>}
+            {action.label}
+            {action.forward && <span aria-hidden="true">→</span>}
+          </a>
+        )}
       </nav>
     </header>
   );

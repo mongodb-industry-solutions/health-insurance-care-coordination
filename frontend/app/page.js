@@ -34,7 +34,10 @@ export default function Home() {
 
   return (
     <main>
-      <Header />
+      <Header
+        navItems={[]}
+        action={{ label: "About this demo", href: "/about", forward: true, subtle: true }}
+      />
       <MemberSelection onStart={handleStart} />
 
       {member && storyOpen && (
