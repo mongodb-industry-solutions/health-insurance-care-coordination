@@ -238,3 +238,14 @@ frontend/next-env.d.ts
 
 # Misc
 *.pem
+
+
+*/data
+*data/
+*chat-resources/
+
+solution-library-dev/
+
+
+*docs/
+*tests/

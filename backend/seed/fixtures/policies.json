@@ -1,0 +1,307 @@
+[
+  {
+    "policyId": "POL-HP-2026-04410",
+    "policyType": "INDIVIDUAL_HEALTH",
+    "planId": "PLAN-PPO-SPEC-4471",
+    "status": "ACTIVE",
+    "version": 1,
+    "isLatestVersion": true,
+    "effectivePeriod": {
+      "effectiveDate": "2025-11-25",
+      "expiryDate": "2026-11-25",
+      "renewalDate": "2026-10-26"
+    },
+    "originalEffectiveDate": "2025-11-25",
+    "parties": [
+      {
+        "customerId": "MBR-2026-44109",
+        "role": "POLICYHOLDER",
+        "isPrimary": true,
+        "firstName": "Maria",
+        "lastName": "Reyes",
+        "dateOfBirth": "1983-04-12"
+      }
+    ],
+    "premium": {
+      "annualPremium": 4200,
+      "currency": "USD",
+      "paymentFrequency": "MONTHLY"
+    },
+    "agentId": "AGT-00118",
+    "agencyId": "AGY-00042",
+    "jurisdiction": {
+      "state": "IL",
+      "country": "US"
+    },
+    "claims": [
+      "CLM-2025-4410901",
+      "CLM-2025-4410902",
+      "CLM-2025-4410903",
+      "CLM-2025-4410904",
+      "CLM-2025-4410905",
+      "CLM-2025-4410906",
+      "CLM-2025-4410907",
+      "CLM-2025-4410908",
+      "CLM-2025-4410909",
+      "CLM-2025-4410910",
+      "CLM-2025-4410911",
+      "CLM-2025-4410912"
+    ],
+    "createdAt": "2025-11-25T00:00:00Z",
+    "updatedAt": "2026-08-20T15:03:07Z"
+  },
+  {
+    "policyId": "POL-HP-2026-05188",
+    "policyType": "INDIVIDUAL_HEALTH",
+    "planId": "PLAN-PPO-SPEC-4471",
+    "status": "ACTIVE",
+    "version": 1,
+    "isLatestVersion": true,
+    "effectivePeriod": {
+      "effectiveDate": "2025-10-26",
+      "expiryDate": "2026-10-26",
+      "renewalDate": "2026-09-26"
+    },
+    "originalEffectiveDate": "2025-10-26",
+    "parties": [
+      {
+        "customerId": "MBR-2026-51882",
+        "role": "POLICYHOLDER",
+        "isPrimary": true,
+        "firstName": "Robert",
+        "lastName": "Chen",
+        "dateOfBirth": "1975-11-03"
+      }
+    ],
+    "premium": {
+      "annualPremium": 4200,
+      "currency": "USD",
+      "paymentFrequency": "MONTHLY"
+    },
+    "agentId": "AGT-00229",
+    "agencyId": "AGY-00042",
+    "jurisdiction": {
+      "state": "TX",
+      "country": "US"
+    },
+    "claims": [
+      "CLM-2025-5188201",
+      "CLM-2025-5188202",
+      "CLM-2025-5188203",
+      "CLM-2025-5188204",
+      "CLM-2025-5188205",
+      "CLM-2025-5188206",
+      "CLM-2025-5188207",
+      "CLM-2025-5188208",
+      "CLM-2025-5188209",
+      "CLM-2025-5188210",
+      "CLM-2025-5188211",
+      "CLM-2025-5188212",
+      "CLM-2025-5188213",
+      "CLM-2025-5188214"
+    ],
+    "createdAt": "2025-10-26T00:00:00Z",
+    "updatedAt": "2026-08-20T15:03:09Z"
+  },
+  {
+    "policyId": "POL-HP-2026-06041",
+    "policyType": "INDIVIDUAL_HEALTH",
+    "planId": "PLAN-HMO-SPEC-2290",
+    "status": "ACTIVE",
+    "version": 1,
+    "isLatestVersion": true,
+    "effectivePeriod": {
+      "effectiveDate": "2025-12-25",
+      "expiryDate": "2026-12-25",
+      "renewalDate": "2026-11-25"
+    },
+    "originalEffectiveDate": "2025-12-25",
+    "parties": [
+      {
+        "customerId": "MBR-2026-60417",
+        "role": "POLICYHOLDER",
+        "isPrimary": true,
+        "firstName": "Aisha",
+        "lastName": "Bello",
+        "dateOfBirth": "1990-07-22"
+      }
+    ],
+    "premium": {
+      "annualPremium": 4200,
+      "currency": "USD",
+      "paymentFrequency": "MONTHLY"
+    },
+    "agentId": "AGT-00301",
+    "agencyId": "AGY-00077",
+    "jurisdiction": {
+      "state": "NY",
+      "country": "US"
+    },
+    "claims": [
+      "CLM-2025-6041701",
+      "CLM-2025-6041702",
+      "CLM-2025-6041703",
+      "CLM-2025-6041704",
+      "CLM-2025-6041705",
+      "CLM-2025-6041706",
+      "CLM-2025-6041707",
+      "CLM-2025-6041708",
+      "CLM-2025-6041709",
+      "CLM-2025-6041710",
+      "CLM-2025-6041711"
+    ],
+    "createdAt": "2025-12-25T00:00:00Z",
+    "updatedAt": "2026-08-20T15:03:11Z"
+  },
+  {
+    "policyId": "POL-HP-2026-08841",
+    "policyType": "INDIVIDUAL_HEALTH",
+    "planId": "PLAN-PPO-SPEC-4471",
+    "status": "ACTIVE",
+    "version": 1,
+    "isLatestVersion": true,
+    "effectivePeriod": {
+      "effectiveDate": "2026-03-25",
+      "expiryDate": "2027-03-25",
+      "renewalDate": "2027-02-23"
+    },
+    "originalEffectiveDate": "2026-03-25",
+    "parties": [
+      {
+        "customerId": "MBR-2026-73305",
+        "role": "POLICYHOLDER",
+        "isPrimary": true,
+        "firstName": "David",
+        "lastName": "Thompson",
+        "dateOfBirth": "1968-02-17"
+      }
+    ],
+    "premium": {
+      "annualPremium": 4200,
+      "currency": "USD",
+      "paymentFrequency": "MONTHLY"
+    },
+    "agentId": "AGT-00421",
+    "agencyId": "AGY-00071",
+    "jurisdiction": {
+      "state": "IL",
+      "country": "US"
+    },
+    "claims": [
+      "CLM-2026-7330501",
+      "CLM-2026-7330502",
+      "CLM-2026-7330503",
+      "CLM-2026-7330504",
+      "CLM-2026-7330505",
+      "CLM-2026-7330506",
+      "CLM-2026-7330507"
+    ],
+    "createdAt": "2026-03-25T00:00:00Z",
+    "updatedAt": "2026-08-20T15:03:13Z"
+  },
+  {
+    "policyId": "POL-HP-2026-08821",
+    "policyType": "INDIVIDUAL_HEALTH",
+    "planId": "PLAN-PPO-STD-1100",
+    "status": "ACTIVE",
+    "version": 1,
+    "isLatestVersion": true,
+    "effectivePeriod": {
+      "effectiveDate": "2025-11-25",
+      "expiryDate": "2026-11-25",
+      "renewalDate": "2026-10-26"
+    },
+    "originalEffectiveDate": "2025-11-25",
+    "parties": [
+      {
+        "customerId": "MBR-2026-88214",
+        "role": "POLICYHOLDER",
+        "isPrimary": true,
+        "firstName": "Grace",
+        "lastName": "Kim",
+        "dateOfBirth": "1979-09-30"
+      }
+    ],
+    "premium": {
+      "annualPremium": 4200,
+      "currency": "USD",
+      "paymentFrequency": "MONTHLY"
+    },
+    "agentId": "AGT-00118",
+    "agencyId": "AGY-00042",
+    "jurisdiction": {
+      "state": "IL",
+      "country": "US"
+    },
+    "claims": [
+      "CLM-2025-8821401",
+      "CLM-2025-8821402",
+      "CLM-2025-8821403",
+      "CLM-2025-8821404",
+      "CLM-2025-8821405",
+      "CLM-2025-8821406",
+      "CLM-2025-8821407",
+      "CLM-2025-8821408",
+      "CLM-2025-8821409",
+      "CLM-2025-8821410",
+      "CLM-2025-8821411",
+      "CLM-2025-8821412",
+      "CLM-2025-8821413"
+    ],
+    "createdAt": "2025-11-25T00:00:00Z",
+    "updatedAt": "2026-08-20T15:03:14Z"
+  },
+  {
+    "policyId": "POL-HP-2026-09073",
+    "policyType": "INDIVIDUAL_HEALTH",
+    "planId": "PLAN-PPO-SPEC-4471",
+    "status": "LAPSED",
+    "version": 1,
+    "isLatestVersion": true,
+    "effectivePeriod": {
+      "effectiveDate": "2025-10-26",
+      "expiryDate": "2026-07-21",
+      "renewalDate": "2026-09-26"
+    },
+    "originalEffectiveDate": "2025-10-26",
+    "parties": [
+      {
+        "customerId": "MBR-2026-90733",
+        "role": "POLICYHOLDER",
+        "isPrimary": true,
+        "firstName": "Frank",
+        "lastName": "Alvarez",
+        "dateOfBirth": "1972-06-08"
+      }
+    ],
+    "premium": {
+      "annualPremium": 4200,
+      "currency": "USD",
+      "paymentFrequency": "MONTHLY"
+    },
+    "agentId": "AGT-00555",
+    "agencyId": "AGY-00090",
+    "jurisdiction": {
+      "state": "CA",
+      "country": "US"
+    },
+    "claims": [
+      "CLM-2025-9073301",
+      "CLM-2025-9073302",
+      "CLM-2025-9073303",
+      "CLM-2025-9073304",
+      "CLM-2025-9073305",
+      "CLM-2025-9073306",
+      "CLM-2025-9073307",
+      "CLM-2025-9073308",
+      "CLM-2025-9073309",
+      "CLM-2025-9073310",
+      "CLM-2025-9073311",
+      "CLM-2025-9073312",
+      "CLM-2025-9073313",
+      "CLM-2025-9073314"
+    ],
+    "createdAt": "2025-10-26T00:00:00Z",
+    "updatedAt": "2026-08-20T15:03:16Z"
+  }
+]

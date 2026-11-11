@@ -1,0 +1,202 @@
+.veil {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background-color: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  animation: veilIn 300ms ease-out;
+}
+
+/* Applied while the carousel is being dismissed, before it unmounts. */
+.leaving {
+  animation: veilOut 450ms ease-in forwards;
+}
+
+.stage {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  animation: cardIn 280ms ease-out;
+}
+
+.leaving .stage {
+  animation: none;
+}
+
+/* The column owns the card width. Without it the track's three 100%-wide
+   slides would size the column to 3x the card and push the arrows off-screen. */
+.column {
+  flex: 0 1 520px;
+  min-width: 0;
+  max-width: calc(100vw - 180px);
+}
+
+.viewport {
+  width: 100%;
+  overflow: hidden;
+  border-radius: 24px;
+}
+
+.track {
+  display: flex;
+  transition: transform 300ms ease;
+}
+
+.slide {
+  flex: 0 0 100%;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+  opacity: 0.4;
+  transition: opacity 300ms ease;
+}
+
+.slideActive {
+  opacity: 1;
+}
+
+/* Arrows float on the veil, outside the card, so the story stays uncluttered. */
+.arrow {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border: none;
+  border-radius: 50%;
+  background-color: #ffffff;
+  color: var(--color-green);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: background-color 150ms ease, opacity 150ms ease,
+    transform 150ms ease;
+}
+
+.arrow:hover:not(:disabled) {
+  background-color: var(--color-green-tint);
+  transform: scale(1.06);
+}
+
+.arrow:disabled {
+  opacity: 0.3;
+  box-shadow: none;
+  cursor: default;
+}
+
+.arrow:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 3px;
+}
+
+.dots {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  background-color: transparent;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.dotActive {
+  background-color: var(--color-green);
+  border-color: var(--color-green);
+}
+
+.dot:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 3px;
+}
+
+@keyframes veilIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes veilOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .veil,
+  .stage,
+  .track,
+  .slide {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* The way back to the picker: centred under the dots, outside the story card. */
+.exit {
+  display: flex;
+  width: fit-content;
+  margin: 20px auto 0;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.exit:hover {
+  background-color: rgba(255, 255, 255, 0.24);
+  border-color: #ffffff;
+}
+
+.exit:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 3px;
+}
+
+/* Arrows stay available on narrow screens, just tighter and smaller. */
+@media (max-width: 720px) {
+  .stage {
+    gap: 10px;
+  }
+
+  .arrow {
+    width: 42px;
+    height: 42px;
+  }
+}

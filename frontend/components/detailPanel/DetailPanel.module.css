@@ -1,0 +1,72 @@
+.panel {
+  margin-top: 26px;
+}
+
+.tabBar {
+  display: flex;
+  gap: 28px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.tab {
+  padding: 0 2px 12px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  font-family: var(--font-serif);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-muted);
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+
+.tab:hover {
+  color: var(--color-charcoal);
+}
+
+.tabActive {
+  color: var(--color-green);
+  border-bottom-color: var(--color-green);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--color-green);
+  outline-offset: 2px;
+}
+
+.content {
+  padding-top: 22px;
+}
+
+.rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 16px;
+  margin: 0;
+}
+
+.label {
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--color-charcoal);
+}
+
+.value {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  color: var(--color-muted);
+  text-align: right;
+}
+
+.note {
+  margin: 20px 0 0;
+  font-family: var(--font-serif);
+  font-size: 13.5px;
+  font-style: italic;
+  line-height: 1.5;
+  color: var(--color-muted);
+}

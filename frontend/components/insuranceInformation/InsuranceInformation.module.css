@@ -1,0 +1,54 @@
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+.summary {
+  margin: 0;
+}
+
+.label {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-green);
+}
+
+.value {
+  margin: 3px 0 15px;
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  font-weight: 400;
+  color: var(--color-charcoal);
+}
+
+.value:last-of-type {
+  margin-bottom: 0;
+}
+
+.sectionLabel {
+  margin: 0 0 14px;
+  font-family: var(--font-serif);
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--color-green);
+}
+
+.tiers {
+  display: flex;
+  gap: 18px;
+}
+
+.status {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  color: var(--color-muted);
+}
+
+@media (max-width: 560px) {
+  .tiers {
+    flex-direction: column;
+  }
+}

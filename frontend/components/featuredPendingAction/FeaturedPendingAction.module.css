@@ -1,0 +1,76 @@
+.urgency {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 9px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--color-green);
+}
+
+.dotHigh {
+  background-color: #c9791a;
+}
+
+.urgencyLabel {
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--color-charcoal);
+}
+
+.context {
+  margin: 8px 0 0;
+  max-width: 46ch;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 1.5;
+  color: #333333;
+}
+
+/* Clear whitespace above the CTA so it never crowds the text. */
+.cta {
+  margin-top: 26px;
+}
+
+.ctaButton {
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.ctaButton:hover {
+  transform: translateY(-2px);
+}
+
+.ctaButton:active {
+  transform: scale(0.98);
+}
+
+.inProgress {
+  margin: 22px 0 0;
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  color: var(--color-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ctaButton,
+  .ctaButton:hover,
+  .ctaButton:active {
+    transition: none;
+    transform: none;
+  }
+}

@@ -1,0 +1,47 @@
+# Human-readable app slug used by Agent Engine tooling.
+# `agentengine create` should rewrite this when generating a new app from the template.
+name: care-coordination-health-insurance
+# Python import path to the SDK App instance.
+# Format: <module path>:<variable name>. This template exposes `app` from
+# src/agent_care_coordination_health_insurance/main.py.
+entrypoint: agent_care_coordination_health_insurance.main:app
+framework: langgraph
+# Runtime feature flags controlled by agent.yaml, not .env. A key that is
+# present here wins over any ENABLE_* environment variable, so declaring memory
+# keeps ambient environment state from switching it on behind your back.
+# Set memory to true to enable long-term profile memory; VOYAGE_API_KEY must be
+# present in .env when memory is enabled.
+features:
+    durable_workflow: true
+    memory: true
+# Tool placement and pass-through secrets. This template's tools are all
+# remote-capable, so they run in the tool sandbox.
+sandboxes:
+    agent:
+        secrets: ["*"]
+        tools: []
+    tool:
+        secrets: ["*"]
+        tools:
+            - get_current_date
+            - save_user_info
+            - recall_user_info
+            - list_members
+            - get_member_clinical_context
+            - get_open_case
+            - match_clinical_concept
+            - get_applicable_guideline
+            - classify_treatment
+            - evaluate_step_therapy
+            - review_trial_history
+            - detect_refill_gaps
+            - resolve_refill_gap
+            - compute_recommendation
+            - record_reasoning_step
+            - record_recommendation
+            - get_member_authorizations
+version: 0.1.0
+network:
+    egress:
+        - fqdn: grove-gateway-prod.azure-api.net
+          ports: [443]

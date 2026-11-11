@@ -1,0 +1,147 @@
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.tab {
+  padding: 5px 13px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: none;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  color: var(--color-muted);
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease,
+    border-color 150ms ease;
+}
+
+.tab:hover {
+  color: var(--color-charcoal);
+}
+
+.tabActive {
+  border-color: var(--color-green);
+  background-color: var(--color-green-tint);
+  color: var(--color-green);
+  font-weight: 600;
+}
+
+.tab:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--color-green);
+  outline-offset: 2px;
+}
+
+.count {
+  opacity: 0.7;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.item:last-child {
+  border-bottom: none;
+}
+
+.itemHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.itemTitle {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-charcoal);
+}
+
+.meta {
+  margin: 4px 0 0;
+  font-family: var(--font-serif);
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.note {
+  margin: 7px 0 0;
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.5;
+  color: #333333;
+}
+
+.pill {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Outcome tints. A reviewed gap is deliberately neutral — it means "explained",
+   not "a problem". */
+.outcomeInadequate {
+  background-color: #ffec9e;
+  color: #944f01;
+}
+
+.outcomeAdequate {
+  background-color: #c0fae6;
+  color: #00593f;
+}
+
+.outcomeNeutral {
+  background-color: var(--color-fill);
+  color: var(--color-muted);
+}
+
+.outcomeGapReviewed {
+  background-color: #e1f7fc;
+  color: #095c77;
+}
+
+.statusActive {
+  background-color: #c0fae6;
+  color: #00593f;
+}
+
+.statusOther {
+  background-color: var(--color-fill);
+  color: var(--color-muted);
+}
+
+.duration {
+  font-family: var(--font-serif);
+  font-size: 13.5px;
+  color: var(--color-muted);
+}
+
+.empty {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  color: var(--color-muted);
+}

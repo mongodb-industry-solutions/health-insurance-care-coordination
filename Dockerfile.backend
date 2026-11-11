@@ -6,13 +6,17 @@ WORKDIR /
 RUN pip install uv
 
 # Copy project files
-COPY /backend/pyproject.toml ./
+COPY backend/pyproject.toml ./
+COPY backend/uv.lock ./
 
 # Install dependencies with uv
-RUN uv sync --no-dev
+RUN uv sync --locked --no-dev --no-install-project
 
 # Copy the rest of the backend code
 COPY ./backend/ .
+
+# Install the local project after its source exists
+RUN uv sync --locked --no-dev
 
 # if using multi-container setup expose 8000 instead
 EXPOSE 8080

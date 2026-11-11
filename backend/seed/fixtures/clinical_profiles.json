@@ -1,0 +1,466 @@
+[
+  {
+    "memberId": "MBR-2026-44109",
+    "firstName": "Maria",
+    "lastName": "Reyes",
+    "dateOfBirth": "1983-04-12",
+    "gender": "female",
+    "state": "IL",
+    "preferredLanguage": "en",
+    "phi_encrypted": "enc::PHI::********",
+    "clinical_history": {
+      "diagnoses": [
+        {
+          "code": "M06.9",
+          "system": "ICD-10",
+          "display": "Rheumatoid arthritis",
+          "status": "active"
+        },
+        {
+          "code": "I10",
+          "system": "ICD-10",
+          "display": "Essential (primary) hypertension",
+          "status": "active"
+        }
+      ],
+      "medications": [
+        {
+          "code": "6851",
+          "system": "RxNorm",
+          "display": "Methotrexate",
+          "status": "active"
+        }
+      ],
+      "treatment_responses": [
+        {
+          "drug": "Methotrexate",
+          "outcome": "ongoing",
+          "duration_months": 3,
+          "notes": "Partial symptom control on Methotrexate; continuing therapy and monitoring.",
+          "documented_by": "Dr. Patel",
+          "documented_on": "2026-03-23"
+        }
+      ],
+      "clinical_notes": [
+        {
+          "note_id": "NOTE-44109-dx",
+          "date": "2025-12-09",
+          "author": "Dr. Patel",
+          "type": "diagnosis",
+          "note": "Diagnosed Rheumatoid arthritis (M06.9). Initiating Methotrexate."
+        },
+        {
+          "note_id": "NOTE-44109-hold",
+          "date": "2026-03-21",
+          "author": "Dr. Patel",
+          "type": "medication_hold",
+          "note": "10-day hold during respiratory infection; not a discontinuation"
+        }
+      ]
+    },
+    "current_care_plan": {
+      "considering_therapy": null,
+      "approved_therapy": null,
+      "managing_provider": {
+        "providerId": "PROV-IL-00201",
+        "name": "Dr. Patel",
+        "specialty": "Rheumatology"
+      }
+    },
+    "pendingActions": [
+      {
+        "actionId": "ACT-44109-01",
+        "type": "DIAGNOSIS_FOLLOW_UP",
+        "status": "pending",
+        "relatedDiagnosisCode": "M06.9",
+        "proposedTreatment": "secukinumab",
+        "raisedBy": "Dr. Patel",
+        "raisedAt": "2025-12-09T00:00:00Z",
+        "linkedAuditTraceId": null
+      }
+    ],
+    "summary": {
+      "active_condition_count": 2,
+      "updated_at": "2026-08-20T15:03:07Z"
+    },
+    "createdAt": "2025-11-25T00:00:00Z",
+    "updatedAt": "2026-08-20T15:03:07Z"
+  },
+  {
+    "memberId": "MBR-2026-51882",
+    "firstName": "Robert",
+    "lastName": "Chen",
+    "dateOfBirth": "1975-11-03",
+    "gender": "male",
+    "state": "TX",
+    "preferredLanguage": "en",
+    "phi_encrypted": "enc::PHI::********",
+    "clinical_history": {
+      "diagnoses": [
+        {
+          "code": "L40.50",
+          "system": "ICD-10",
+          "display": "Psoriatic arthritis",
+          "status": "active"
+        }
+      ],
+      "medications": [
+        {
+          "code": "6851",
+          "system": "RxNorm",
+          "display": "Methotrexate",
+          "status": "active"
+        }
+      ],
+      "treatment_responses": [
+        {
+          "drug": "Methotrexate",
+          "outcome": "ongoing",
+          "duration_months": 3,
+          "notes": "Partial symptom control on Methotrexate; continuing therapy and monitoring.",
+          "documented_by": "Dr. Okafor",
+          "documented_on": "2026-02-21"
+        }
+      ],
+      "clinical_notes": [
+        {
+          "note_id": "NOTE-51882-dx",
+          "date": "2025-11-09",
+          "author": "Dr. Okafor",
+          "type": "diagnosis",
+          "note": "Diagnosed Psoriatic arthritis (L40.50). Initiating Methotrexate."
+        }
+      ]
+    },
+    "current_care_plan": {
+      "considering_therapy": null,
+      "approved_therapy": null,
+      "managing_provider": {
+        "providerId": "PROV-TX-00347",
+        "name": "Dr. Okafor",
+        "specialty": "Rheumatology"
+      }
+    },
+    "pendingActions": [
+      {
+        "actionId": "ACT-51882-01",
+        "type": "DIAGNOSIS_FOLLOW_UP",
+        "status": "pending",
+        "relatedDiagnosisCode": "L40.50",
+        "proposedTreatment": "adalimumab",
+        "raisedBy": "Dr. Okafor",
+        "raisedAt": "2025-11-09T00:00:00Z",
+        "linkedAuditTraceId": null
+      }
+    ],
+    "summary": {
+      "active_condition_count": 1,
+      "updated_at": "2026-08-20T15:03:09Z"
+    },
+    "createdAt": "2025-10-26T00:00:00Z",
+    "updatedAt": "2026-08-20T15:03:09Z"
+  },
+  {
+    "memberId": "MBR-2026-60417",
+    "firstName": "Aisha",
+    "lastName": "Bello",
+    "dateOfBirth": "1990-07-22",
+    "gender": "female",
+    "state": "NY",
+    "preferredLanguage": "en",
+    "phi_encrypted": "enc::PHI::********",
+    "clinical_history": {
+      "diagnoses": [
+        {
+          "code": "K50.90",
+          "system": "ICD-10",
+          "display": "Crohn's disease",
+          "status": "active"
+        }
+      ],
+      "medications": [
+        {
+          "code": "1256",
+          "system": "RxNorm",
+          "display": "Azathioprine",
+          "status": "active"
+        }
+      ],
+      "treatment_responses": [
+        {
+          "drug": "Azathioprine",
+          "outcome": "partial",
+          "duration_months": 6,
+          "notes": "6-month trial of Azathioprine: partial response, not clearly inadequate. Escalation under consideration.",
+          "documented_by": "Dr. Nguyen",
+          "documented_on": "2026-07-21"
+        }
+      ],
+      "clinical_notes": [
+        {
+          "note_id": "NOTE-60417-dx",
+          "date": "2026-01-08",
+          "author": "Dr. Nguyen",
+          "type": "diagnosis",
+          "note": "Diagnosed Crohn's disease (K50.90). Initiating Azathioprine."
+        },
+        {
+          "note_id": "NOTE-60417-partial",
+          "date": "2026-07-21",
+          "author": "Dr. Nguyen",
+          "type": "treatment_review",
+          "note": "Partial response to Azathioprine after 6 months; considering escalation to ustekinumab."
+        }
+      ]
+    },
+    "current_care_plan": {
+      "considering_therapy": null,
+      "approved_therapy": null,
+      "managing_provider": {
+        "providerId": "PROV-NY-00512",
+        "name": "Dr. Nguyen",
+        "specialty": "Rheumatology"
+      }
+    },
+    "pendingActions": [
+      {
+        "actionId": "ACT-60417-01",
+        "type": "DIAGNOSIS_FOLLOW_UP",
+        "status": "pending",
+        "relatedDiagnosisCode": "K50.90",
+        "proposedTreatment": "ustekinumab",
+        "raisedBy": "Dr. Nguyen",
+        "raisedAt": "2026-01-08T00:00:00Z",
+        "linkedAuditTraceId": null
+      }
+    ],
+    "summary": {
+      "active_condition_count": 1,
+      "updated_at": "2026-08-20T15:03:11Z"
+    },
+    "createdAt": "2025-12-25T00:00:00Z",
+    "updatedAt": "2026-08-20T15:03:11Z"
+  },
+  {
+    "memberId": "MBR-2026-73305",
+    "firstName": "David",
+    "lastName": "Thompson",
+    "dateOfBirth": "1968-02-17",
+    "gender": "male",
+    "state": "IL",
+    "preferredLanguage": "en",
+    "phi_encrypted": "enc::PHI::********",
+    "clinical_history": {
+      "diagnoses": [
+        {
+          "code": "M06.9",
+          "system": "ICD-10",
+          "display": "Rheumatoid arthritis",
+          "status": "active"
+        }
+      ],
+      "medications": [
+        {
+          "code": "6851",
+          "system": "RxNorm",
+          "display": "Methotrexate",
+          "status": "active"
+        }
+      ],
+      "treatment_responses": [
+        {
+          "drug": "Methotrexate",
+          "outcome": "ongoing",
+          "duration_months": 3,
+          "notes": "Partial symptom control on Methotrexate; continuing therapy and monitoring.",
+          "documented_by": "Dr. Patel",
+          "documented_on": "2026-07-21"
+        }
+      ],
+      "clinical_notes": [
+        {
+          "note_id": "NOTE-73305-dx",
+          "date": "2026-04-08",
+          "author": "Dr. Patel",
+          "type": "diagnosis",
+          "note": "Diagnosed Rheumatoid arthritis (M06.9). Initiating Methotrexate."
+        }
+      ]
+    },
+    "current_care_plan": {
+      "considering_therapy": null,
+      "approved_therapy": null,
+      "managing_provider": {
+        "providerId": "PROV-IL-00201",
+        "name": "Dr. Patel",
+        "specialty": "Rheumatology"
+      }
+    },
+    "pendingActions": [
+      {
+        "actionId": "ACT-73305-01",
+        "type": "DIAGNOSIS_FOLLOW_UP",
+        "status": "pending",
+        "relatedDiagnosisCode": "M06.9",
+        "proposedTreatment": "secukinumab",
+        "raisedBy": "Dr. Patel",
+        "raisedAt": "2026-04-08T00:00:00Z",
+        "linkedAuditTraceId": null
+      }
+    ],
+    "summary": {
+      "active_condition_count": 1,
+      "updated_at": "2026-08-20T15:03:13Z"
+    },
+    "createdAt": "2026-03-25T00:00:00Z",
+    "updatedAt": "2026-08-20T15:03:13Z"
+  },
+  {
+    "memberId": "MBR-2026-88214",
+    "firstName": "Grace",
+    "lastName": "Kim",
+    "dateOfBirth": "1979-09-30",
+    "gender": "female",
+    "state": "IL",
+    "preferredLanguage": "en",
+    "phi_encrypted": "enc::PHI::********",
+    "clinical_history": {
+      "diagnoses": [
+        {
+          "code": "M06.9",
+          "system": "ICD-10",
+          "display": "Rheumatoid arthritis",
+          "status": "active"
+        }
+      ],
+      "medications": [
+        {
+          "code": "6851",
+          "system": "RxNorm",
+          "display": "Methotrexate",
+          "status": "active"
+        }
+      ],
+      "treatment_responses": [
+        {
+          "drug": "Methotrexate",
+          "outcome": "ongoing",
+          "duration_months": 3,
+          "notes": "Partial symptom control on Methotrexate; continuing therapy and monitoring.",
+          "documented_by": "Dr. Patel",
+          "documented_on": "2026-03-23"
+        }
+      ],
+      "clinical_notes": [
+        {
+          "note_id": "NOTE-88214-dx",
+          "date": "2025-12-09",
+          "author": "Dr. Patel",
+          "type": "diagnosis",
+          "note": "Diagnosed Rheumatoid arthritis (M06.9). Initiating Methotrexate."
+        }
+      ]
+    },
+    "current_care_plan": {
+      "considering_therapy": null,
+      "approved_therapy": null,
+      "managing_provider": {
+        "providerId": "PROV-IL-00201",
+        "name": "Dr. Patel",
+        "specialty": "Rheumatology"
+      }
+    },
+    "pendingActions": [
+      {
+        "actionId": "ACT-88214-01",
+        "type": "DIAGNOSIS_FOLLOW_UP",
+        "status": "pending",
+        "relatedDiagnosisCode": "M06.9",
+        "proposedTreatment": "secukinumab",
+        "raisedBy": "Dr. Patel",
+        "raisedAt": "2025-12-09T00:00:00Z",
+        "linkedAuditTraceId": null
+      }
+    ],
+    "summary": {
+      "active_condition_count": 1,
+      "updated_at": "2026-08-20T15:03:14Z"
+    },
+    "createdAt": "2025-11-25T00:00:00Z",
+    "updatedAt": "2026-08-20T15:03:14Z"
+  },
+  {
+    "memberId": "MBR-2026-90733",
+    "firstName": "Frank",
+    "lastName": "Alvarez",
+    "dateOfBirth": "1972-06-08",
+    "gender": "male",
+    "state": "CA",
+    "preferredLanguage": "en",
+    "phi_encrypted": "enc::PHI::********",
+    "clinical_history": {
+      "diagnoses": [
+        {
+          "code": "L40.50",
+          "system": "ICD-10",
+          "display": "Psoriatic arthritis",
+          "status": "active"
+        }
+      ],
+      "medications": [
+        {
+          "code": "6851",
+          "system": "RxNorm",
+          "display": "Methotrexate",
+          "status": "active"
+        }
+      ],
+      "treatment_responses": [
+        {
+          "drug": "Methotrexate",
+          "outcome": "ongoing",
+          "duration_months": 3,
+          "notes": "Partial symptom control on Methotrexate; continuing therapy and monitoring.",
+          "documented_by": "Dr. Ibrahim",
+          "documented_on": "2026-02-21"
+        }
+      ],
+      "clinical_notes": [
+        {
+          "note_id": "NOTE-90733-dx",
+          "date": "2025-11-09",
+          "author": "Dr. Ibrahim",
+          "type": "diagnosis",
+          "note": "Diagnosed Psoriatic arthritis (L40.50). Initiating Methotrexate."
+        }
+      ]
+    },
+    "current_care_plan": {
+      "considering_therapy": null,
+      "approved_therapy": null,
+      "managing_provider": {
+        "providerId": "PROV-CA-00688",
+        "name": "Dr. Ibrahim",
+        "specialty": "Rheumatology"
+      }
+    },
+    "pendingActions": [
+      {
+        "actionId": "ACT-90733-01",
+        "type": "DIAGNOSIS_FOLLOW_UP",
+        "status": "pending",
+        "relatedDiagnosisCode": "L40.50",
+        "proposedTreatment": "adalimumab",
+        "raisedBy": "Dr. Ibrahim",
+        "raisedAt": "2025-11-09T00:00:00Z",
+        "linkedAuditTraceId": null
+      }
+    ],
+    "summary": {
+      "active_condition_count": 1,
+      "updated_at": "2026-08-20T15:03:16Z"
+    },
+    "createdAt": "2025-10-26T00:00:00Z",
+    "updatedAt": "2026-08-20T15:03:16Z"
+  }
+]
